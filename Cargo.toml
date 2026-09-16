@@ -6,6 +6,7 @@ rust-version = "1.95"
 description = "A small LLM-first shell for using your computer"
 repository = "https://github.com/kestiny18/Dao-Shell"
 readme = "README.md"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]

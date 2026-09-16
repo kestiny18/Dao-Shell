@@ -60,4 +60,4 @@ Dao-Shell 采用 **build in public** 的方式推进：公开小步进展、关�
 
 [体验指南](docs/GETTING_STARTED.md) 包含获取、启动与模型配置；想运行源码，请看 [开发指南](docs/DEVELOPMENT.md)。
 
-维护者：[kestiny18](https://github.com/kestiny18)。项目许可证待确定，当前公开开发过程与源码。
+维护者：[kestiny18](https://github.com/kestiny18)。Copyright 2026 kestiny18。项目采用 [Apache License 2.0](LICENSE)。

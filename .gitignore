@@ -1,0 +1,14 @@
+/target/
+/.tools/
+/dist/
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.log
+*.zip
+/local/
+/dao-shell.local.json

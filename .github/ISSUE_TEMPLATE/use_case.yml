@@ -1,0 +1,22 @@
+name: 一个真实使用场景 / Use case
+description: 说说你想让电脑帮你完成什么。
+title: "[场景] "
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: 你想完成什么？
+      description: 用一个具体的电脑操作场景描述。
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 现在怎么做，哪一步最麻烦？
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 你希望怎样交互？
+      description: 可以写一句你想对 Dao-Shell 说的话，或描述需要哪些确认。

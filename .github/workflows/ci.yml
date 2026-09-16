@@ -1,0 +1,22 @@
+name: Rust checks
+on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup show
+      - run: cargo fmt --check
+      - run: cargo test --locked --all-targets
+      - if: runner.os == 'Windows'
+        run: cargo clippy --locked --all-targets -- -D warnings

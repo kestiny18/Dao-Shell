@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title description">
+  <title id="title">Dao-Shell — 用一句话，开始操作你的电脑</title>
+  <desc id="description">交互示意，非运行截图。左侧介绍轻量电脑入口，右侧展示找文件、查看移动方案和本地确认三个步骤。当前产品是命令行开发预览版。</desc>
+  <rect width="1280" height="620" rx="24" fill="#f4f3ee"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+    <rect x="54" y="52" width="44" height="44" rx="12" fill="#1d5146"/>
+    <path d="M65 65l9 9-9 9m15 0h9" stroke="#f4f3ee" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="114" y="82" font-size="25" font-weight="700" fill="#17362f">Dao-Shell</text>
+    <text x="55" y="191" font-size="43" font-weight="700" fill="#17362f">少记路径，</text>
+    <text x="55" y="251" font-size="43" font-weight="700" fill="#17362f">多说一句。</text>
+    <text x="56" y="311" font-size="21" fill="#5b6a62">找文件。理清操作。看懂当前状态。</text>
+    <text x="56" y="347" font-size="21" fill="#5b6a62">从查找，到确认，再到完成。</text>
+    <rect x="56" y="398" width="120" height="35" rx="17" fill="#e0e8df"/>
+    <text x="116" y="422" text-anchor="middle" font-size="15" fill="#285448">LLM 为主入口</text>
+    <rect x="188" y="398" width="126" height="35" rx="17" fill="#e0e8df"/>
+    <text x="251" y="422" text-anchor="middle" font-size="15" fill="#285448">Windows 优先</text>
+    <text x="56" y="551" font-size="15" fill="#617169" letter-spacing="2">BUILDING IN PUBLIC</text>
+    <text x="56" y="578" font-size="14" fill="#76847a">一个辅助人使用电脑的小入口。</text>
+    <rect x="518" y="46" width="708" height="528" rx="18" fill="#182b27"/>
+    <circle cx="546" cy="76" r="5" fill="#6f9181"/>
+    <circle cx="565" cy="76" r="5" fill="#536f61"/>
+    <circle cx="584" cy="76" r="5" fill="#536f61"/>
+    <text x="1197" y="81" text-anchor="end" font-size="13" fill="#a1b7a9">交互示意 · CLI 开发预览</text>
+    <line x1="518" y1="103" x2="1226" y2="103" stroke="#334b41"/>
+    <text x="552" y="147" font-size="14" fill="#94bea6">01 / 说出需求</text>
+    <text x="552" y="188" font-size="24" fill="#f3f5ed">“找下载目录里的合同文件。”</text>
+    <text x="552" y="226" font-size="18" fill="#b3c4b9">1. 合同修订.pdf</text>
+    <text x="770" y="226" font-size="18" fill="#b3c4b9">2. 租赁说明.pdf</text>
+    <line x1="552" y1="253" x2="1192" y2="253" stroke="#334b41"/>
+    <text x="552" y="289" font-size="14" fill="#94bea6">02 / 沿着结果继续</text>
+    <text x="552" y="330" font-size="24" fill="#f3f5ed">“把第一个移到归档文件夹。”</text>
+    <text x="552" y="369" font-size="18" fill="#b3c4b9">合同修订.pdf  →  归档 / 合同修订.pdf</text>
+    <line x1="552" y1="396" x2="1192" y2="396" stroke="#334b41"/>
+    <text x="552" y="432" font-size="14" fill="#94bea6">03 / 看清方案，再确认</text>
+    <text x="552" y="474" font-size="22" fill="#f3f5ed">准备移动 1 个文件。是否执行？</text>
+    <rect x="552" y="500" width="150" height="40" rx="7" fill="#c6e5b5"/>
+    <text x="627" y="527" text-anchor="middle" font-size="17" font-weight="600" fill="#183d2e">由你决定</text>
+    <text x="719" y="526" font-size="16" fill="#a1b7a9">完成后，报告实际结果。</text>
+  </g>
+</svg>

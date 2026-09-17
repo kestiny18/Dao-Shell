@@ -1,7 +1,7 @@
 param([string]$Binary)
 $ErrorActionPreference = 'Stop'
 $workspace = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-if (-not $Binary) { $Binary = Join-Path $workspace 'target\release\dao-shell.exe' }
+if (-not $Binary) { $Binary = Join-Path $workspace 'target\release\daosh.exe' }
 $Binary = (Resolve-Path -LiteralPath $Binary).Path
 $fixture = Join-Path $workspace ('.tools\smoke-' + [guid]::NewGuid().ToString('N'))
 $inside = Join-Path $fixture 'allowed'

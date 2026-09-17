@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(version, about = "以自然语言操作文件、查看资源的小型智能 Shell")]
+#[command(name = "daosh", version, about = "以自然语言操作文件、查看资源的小型智能 Shell")]
 pub struct Args {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
@@ -95,4 +95,15 @@ pub enum ConfigAction {
         key_env: String,
     },
     ClearModel,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use clap::CommandFactory;
+
+    #[test]
+    fn command_name_is_daosh() {
+        assert_eq!(Args::command().get_name(), "daosh");
+    }
 }

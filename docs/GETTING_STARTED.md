@@ -4,9 +4,9 @@
 
 ## 获取程序
 
-当前尚未发布正式下载版本。先按 [开发指南](DEVELOPMENT.md) 从源码构建；构建后程序在 `target/release/dao-shell.exe`，打包目录在 `dist/dao-shell-0.1.0-windows-x64/`。后续下载入口会放在 [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases)，并标明验证范围。
+当前尚未发布正式下载版本。先按 [开发指南](DEVELOPMENT.md) 从源码构建；构建后程序在 `target/release/daosh.exe`，打包目录在 `dist/daosh-0.1.0-windows-x64/`。后续下载入口会放在 [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases)，并标明验证范围。
 
-下面的 PowerShell 示例在 `dao-shell.exe` 所在目录运行。
+下面的 PowerShell 示例在 `daosh.exe` 所在目录运行。
 
 ## 第一次启动
 
@@ -15,8 +15,8 @@
 ```powershell
 $demo = Join-Path $env:USERPROFILE 'Documents\DaoShellDemo'
 New-Item -ItemType Directory -Force -Path $demo | Out-Null
-.\dao-shell.exe config add-read "$env:USERPROFILE\Downloads"
-.\dao-shell.exe config add-write $demo
+.\daosh.exe config add-read "$env:USERPROFILE\Downloads"
+.\daosh.exe config add-write $demo
 ```
 
 可读与可写范围分开设置；可写目录同时允许查询。目录必须存在。你也可以用启动参数 `--read-root <目录>`、`--write-root <目录>` 仅为本次运行增加范围，模型不能自行扩大它们。
@@ -24,8 +24,8 @@ New-Item -ItemType Directory -Force -Path $demo | Out-Null
 先不配置模型，也能试一下搜索和资源观测：
 
 ```powershell
-.\dao-shell.exe search 合同 --in "$env:USERPROFILE\Downloads" --extension pdf
-.\dao-shell.exe resources --sample-ms 2000 --limit 10
+.\daosh.exe search 合同 --in "$env:USERPROFILE\Downloads" --extension pdf
+.\daosh.exe resources --sample-ms 2000 --limit 10
 ```
 
 `--in` 只授权本次读取，不添加写入权限。第一次体验移动时，请手动把几个不重要的样例文件复制到试用目录。
@@ -37,10 +37,10 @@ New-Item -ItemType Directory -Force -Path $demo | Out-Null
 `--endpoint` 是包含 `/chat/completions` 的完整请求地址，`--model` 使用服务商的实际模型 ID。替换下列占位值：
 
 ```powershell
-.\dao-shell.exe config model --endpoint 'https://你的服务地址/v1/chat/completions' --model '实际模型 ID'
+.\daosh.exe config model --endpoint 'https://你的服务地址/v1/chat/completions' --model '实际模型 ID'
 $secret = Read-Host 'API Key' -AsSecureString
 $env:DAO_SHELL_API_KEY = [Net.NetworkCredential]::new('', $secret).Password
-.\dao-shell.exe
+.\daosh.exe
 ```
 
 OpenAI 官方接口地址为 `https://api.openai.com/v1/chat/completions`；其他服务按其文档填写。本地服务可用 `http://127.0.0.1:<端口>/v1/chat/completions`，无需密钥。远程服务要求 HTTPS。
@@ -77,11 +77,11 @@ OpenAI 官方接口地址为 `https://api.openai.com/v1/chat/completions`；其�
 独立命令还包括：
 
 ```powershell
-.\dao-shell.exe doctor
-.\dao-shell.exe config show
-.\dao-shell.exe history --reconcile
-.\dao-shell.exe history --clear
-.\dao-shell.exe search --help
+.\daosh.exe doctor
+.\daosh.exe config show
+.\daosh.exe history --reconcile
+.\daosh.exe history --clear
+.\daosh.exe search --help
 ```
 
 `doctor` 不发送模型请求。操作记录位于 `%LOCALAPPDATA%\Dao-Shell`，已完成记录保留 7 天，待核对记录不会自动清除；重启只核对已知对象，不重做上次操作。`history --clear` 需本地确认。

@@ -248,7 +248,7 @@ pub fn search(
     };
     ensure!(
         !roots.is_empty(),
-        "尚未设置读取目录。使用 --read-root 或 dao-shell config 配置"
+        "尚未设置读取目录。使用 --read-root 或 daosh config 配置"
     );
     let start = Instant::now();
     let query = request.query.to_lowercase();

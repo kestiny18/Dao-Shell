@@ -6,9 +6,9 @@ $metadata = (& (Join-Path $PSScriptRoot 'dev.ps1') metadata --locked --format-ve
 $project = $metadata.packages | Where-Object { $_.name -eq 'dao-shell' -and -not $_.source } | Select-Object -First 1
 if (-not $project) { throw 'Project metadata not found' }
 $version = $project.version
-$package = Join-Path $workspace "dist\dao-shell-$version-windows-x64"
+$package = Join-Path $workspace "dist\daosh-$version-windows-x64"
 New-Item -ItemType Directory -Force -Path $package | Out-Null
-Copy-Item -LiteralPath (Join-Path $workspace 'target\release\dao-shell.exe') -Destination $package
+Copy-Item -LiteralPath (Join-Path $workspace 'target\release\daosh.exe') -Destination $package
 Copy-Item -LiteralPath (Join-Path $workspace 'README.md') -Destination $package
 foreach ($name in @('ROADMAP.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE')) {
     $document = Join-Path $workspace $name

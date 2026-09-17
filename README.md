@@ -1,10 +1,12 @@
 # Dao-Shell
 
+[简体中文](README.md) · [English](README.en.md) · [文档导航](docs/README.md)
+
 **用一句话，开始操作你的电脑。**
 
 Dao-Shell 是一个以 LLM 为主要入口的轻量智能 Shell。你说出想做的事，它帮你找到文件、看清操作方案，在你确认后完成整理，并告诉你实际发生了什么。
 
-[开始体验](docs/GETTING_STARTED.md) · [正在做什么](ROADMAP.md) · [开发日志](docs/devlog/README.md) · [反馈一个使用场景](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
+[开始体验](docs/GETTING_STARTED.md) · [文档导航](docs/README.md) · [正在做什么](ROADMAP.md) · [开发日志](docs/devlog/README.md) · [反馈一个使用场景](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
 
 ![Dao-Shell 交互示意：用自然语言找文件，查看移动方案，确认后执行。](docs/assets/dao-shell-preview.svg)
 
@@ -59,5 +61,7 @@ Dao-Shell 采用 **build in public** 的方式推进：公开小步进展、关�
 目前适合愿意反馈问题的早期使用者，需要 Windows 和一个支持工具调用的模型服务。也可以先体验不依赖模型的文件搜索。
 
 [体验指南](docs/GETTING_STARTED.md) 包含获取、启动与模型配置；想运行源码，请看 [开发指南](docs/DEVELOPMENT.md)。
+
+构建后的命令名是 `daosh`；Dao-Shell 是项目名称。
 
 维护者：[kestiny18](https://github.com/kestiny18)。Copyright 2026 kestiny18。项目采用 [Apache License 2.0](LICENSE)。

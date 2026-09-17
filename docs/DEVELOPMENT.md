@@ -13,6 +13,8 @@ cargo run -- --help
 
 Rust 版本锁定于 `rust-toolchain.toml`，依赖锁定于 `Cargo.lock`。Windows 推荐已有的 MSVC Rust 与 C++ 构建环境；其他平台目前只做核心编译/逻辑检查，不代表已经交付系统操作适配。
 
+项目名和 Cargo 包名仍是 Dao-Shell / `dao-shell`，用户运行的二进制与命令名是 `daosh`。显式的 `[[bin]]` 配置负责生成 `target/release/daosh.exe`。
+
 缺少 Windows 工具链时，可使用项目的可选 GNU 开发脚本：
 
 ```powershell

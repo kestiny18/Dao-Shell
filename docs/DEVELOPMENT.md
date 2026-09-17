@@ -43,12 +43,21 @@ Unix 构建还需要 C 编译器，以及用于原生 TLS 的 OpenSSL 开发库�
 
 CI 分别在 Windows 和 Ubuntu 跑测试；实际运行结果以仓库 Actions 页面为准。首次公开前的本机验证记录见 [实现记录](IMPLEMENTATION.md)。
 
+Windows 进程 CPU 的真实负载复现单独运行（会短暂占用一个测试线程）：
+
+```powershell
+.\scripts\dev.ps1 test -CargoArgs @('--locked', '--test', 'resource_sampling', '--', '--ignored', '--nocapture')
+```
+
+默认测试覆盖 CPU 时间差计算边界，负载复现不放进常规 CI，避免宿主机调度造成不稳定结果。
+
 ## 代码组织
 
 ```text
 src/
   cli/              # 入口流程、参数定义、终端渲染与本地确认
-  dialogue.rs       # 模型适配、上下文、有限工具调用循环
+  dialogue.rs       # 上下文与有限工具调用循环
+  model.rs          # 模型传输、错误分类、固定样例的连接诊断
   capabilities.rs   # 六项能力的描述和参数分发
   files.rs          # 范围、查询、对象引用
   operations.rs     # 准备、确认、执行、核验、取消

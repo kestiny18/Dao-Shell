@@ -282,3 +282,39 @@ fn remote_plaintext_and_url_credentials_are_rejected_before_network() {
         );
     }
 }
+
+#[test]
+fn empty_followup_search_keeps_the_same_visible_candidate_references() {
+    let (_temp, mut runtime) = setup();
+    let mut ui = Ui::default();
+    let first = runtime
+        .call("file_search", json!({"query":"合同"}), &mut ui)
+        .unwrap();
+    let selection = runtime.last_results.clone();
+    assert_eq!(selection.len(), 1);
+    let second = runtime
+        .call("file_search", json!({"query":"SLA-no-result"}), &mut ui)
+        .unwrap();
+    assert!(second["items"].as_array().unwrap().is_empty());
+    assert_eq!(second["selection_retained"], true);
+    assert_eq!(second["active_selection"], first["active_selection"]);
+    assert_eq!(runtime.last_results, selection);
+    assert_eq!(
+        runtime.current_selection().unwrap()["items"],
+        first["items"]
+    );
+    assert!(
+        runtime
+            .objects
+            .checked(&selection[0], &runtime.scope, false)
+            .is_ok()
+    );
+    let third = runtime
+        .call("file_search", json!({"query":"合同"}), &mut ui)
+        .unwrap();
+    assert_eq!(third["selection_retained"], false);
+    assert_eq!(
+        runtime.last_results[0],
+        third["items"][0]["id"].as_str().unwrap()
+    );
+}

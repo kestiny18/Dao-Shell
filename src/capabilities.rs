@@ -1,5 +1,5 @@
 use crate::{
-    core::{Cancellation, FileObject, Operation},
+    core::{Cancellation, FileObject, Operation, safe_text},
     files::{self, Objects, Scope, Search},
     operations, resources,
     storage::Journal,
@@ -38,10 +38,29 @@ impl Runtime {
         let value = match name {
             "file_search" => {
                 let request: Search = serde_json::from_value(arguments)?;
-                ui.progress("正在查找文件……");
+                ui.progress(&format!(
+                    "正在查找文件（关键词：{}）……",
+                    if request.query.is_empty() {
+                        "全部".into()
+                    } else {
+                        safe_text(&request.query)
+                    }
+                ));
                 let result = files::search(&request, &self.scope, &mut self.objects, &self.cancel)?;
-                self.last_results = result.items.iter().map(|o| o.id.clone()).collect();
-                serde_json::to_value(result)?
+                let retained = result.items.is_empty() && !self.last_results.is_empty();
+                if !result.items.is_empty() {
+                    self.last_results = result.items.iter().map(|o| o.id.clone()).collect();
+                }
+                let mut value = serde_json::to_value(result)?;
+                value["selection_retained"] = json!(retained);
+                value["active_selection"] = json!(
+                    self.last_results
+                        .iter()
+                        .enumerate()
+                        .map(|(i, id)| json!({"index": i + 1, "object_id": id}))
+                        .collect::<Vec<_>>()
+                );
+                value
             }
             "file_inspect" => {
                 let request: Reference = serde_json::from_value(arguments)?;
@@ -86,13 +105,28 @@ impl Runtime {
             }
             "resource_snapshot" | "process_list" => {
                 let request: resources::Request = serde_json::from_value(arguments)?;
-                ui.progress("正在采样资源与进程……");
+                ui.progress(&format!(
+                    "正在采样资源与进程（按{}排序）……",
+                    match request.sort {
+                        resources::ProcessSort::Cpu => "CPU",
+                        resources::ProcessSort::Memory => "内存",
+                    }
+                ));
                 resources::snapshot(&request, &self.cancel, name == "process_list")?
             }
             _ => bail!("不支持的能力；不能执行任意命令"),
         };
         ui.result(name, &value);
         Ok(value)
+    }
+
+    pub fn current_selection(&self) -> Result<Value> {
+        let items = self
+            .last_results
+            .iter()
+            .map(|id| self.objects.get(id).cloned())
+            .collect::<Result<Vec<_>>>()?;
+        Ok(json!({"items":items}))
     }
 }
 #[derive(Deserialize)]

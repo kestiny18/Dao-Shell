@@ -21,7 +21,7 @@ The first release deliberately excludes arbitrary command execution, autonomous 
 
 ## Current status
 
-Dao-Shell has working code and deterministic tests, but it is not a stable end-user release. File search, guarded moves, resource sampling, and the natural-language tool loop are implemented. Real-model usability and clean Windows distribution still need broader validation. See the [implementation record](docs/IMPLEMENTATION.md) for evidence and limitations.
+Dao-Shell has working code and deterministic tests, but it is not a stable end-user release. A Windows user has completed an initial real-model trial of file search, follow-up references, and PDF opening with DeepSeek. Guided setup and an explicit model connection check are available. Guarded moves, broader model usability, corrected resource sampling, and clean Windows distribution still need user acceptance testing. See the [implementation record](docs/IMPLEMENTATION.md) for evidence and limitations.
 
 ## Build and run
 

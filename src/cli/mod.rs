@@ -1,9 +1,11 @@
 mod args;
+mod doctor;
+mod setup;
 mod terminal;
 
 pub use args::Args;
 use args::{Command, ConfigAction, SearchSort};
-use terminal::{Terminal, confirm, display_path, pretty, render};
+use terminal::{Terminal, confirm, display_path, display_roots, pretty, render};
 
 use crate::{
     capabilities::{Interaction, Runtime},
@@ -21,6 +23,12 @@ pub async fn run(args: Args) -> Result<()> {
     let config_path = args.config.unwrap_or_else(Config::path);
     let data_path = args.data_dir.unwrap_or_else(data_dir);
     let mut config = Config::load(&config_path)?;
+    let cancel = Cancellation::default();
+    let signal = cancel.clone();
+    ctrlc::set_handler(move || signal.cancel())?;
+    if matches!(args.command, Some(Command::Setup)) {
+        return setup::run(&config, &config_path, &cancel);
+    }
     if let Some(Command::Config { action }) = args.command {
         match action {
             ConfigAction::Show => {
@@ -38,11 +46,13 @@ pub async fn run(args: Args) -> Result<()> {
                 model,
                 key_env,
             } => {
-                config.model = Some(ModelConfig {
+                let model = ModelConfig {
                     endpoint,
                     model,
                     api_key_env: key_env,
-                })
+                };
+                model.validate()?;
+                config.model = Some(model);
             }
             ConfigAction::ClearModel => config.model = None,
         }
@@ -53,6 +63,9 @@ pub async fn run(args: Args) -> Result<()> {
     }
     config.read_roots.extend(args.read_root);
     config.write_roots.extend(args.write_root);
+    if let Some(Command::Doctor { check_model }) = args.command {
+        return doctor::run(&config, &config_path, &data_path, check_model, &cancel).await;
+    }
     if let Some(Command::Search {
         directory: Some(path),
         ..
@@ -61,36 +74,7 @@ pub async fn run(args: Args) -> Result<()> {
         config.read_roots.push(path.clone());
     }
     let scope = Scope::new(&config.read_roots, &config.write_roots)?;
-    let cancel = Cancellation::default();
-    let signal = cancel.clone();
-    ctrlc::set_handler(move || signal.cancel())?;
     match args.command {
-        Some(Command::Doctor) => {
-            println!(
-                "Dao-Shell {} / {}\n配置：{}\n记录：{}\n读取范围：{}\n写入范围：{}",
-                env!("CARGO_PKG_VERSION"),
-                std::env::consts::OS,
-                display_path(&config_path),
-                display_path(&data_path),
-                serde_json::to_string(scope.read_roots())?,
-                serde_json::to_string(scope.write_roots())?
-            );
-            if let Some(m) = config.model {
-                println!(
-                    "模型：{}；密钥环境变量 {} {}（未测试连接）",
-                    safe_text(&m.model),
-                    safe_text(&m.api_key_env),
-                    if std::env::var(&m.api_key_env).is_ok_and(|s| !s.is_empty()) {
-                        "已设置"
-                    } else {
-                        "未设置"
-                    }
-                );
-            } else {
-                println!("模型未配置；直接搜索与资源观测可用。");
-            }
-            return Ok(());
-        }
         Some(Command::Search {
             query,
             directory,
@@ -134,7 +118,12 @@ pub async fn run(args: Args) -> Result<()> {
                     .items
                     .get(index.checked_sub(1).context("序号从 1 开始")?)
                     .context("序号不在本页结果中")?;
-                pretty(&files::open(&objects.checked(&object.id, &scope, false)?)?);
+                let opened = files::open(&objects.checked(&object.id, &scope, false)?)?;
+                if json {
+                    pretty(&opened);
+                } else {
+                    render("file_open", &opened);
+                }
             }
             return Ok(());
         }
@@ -192,8 +181,8 @@ pub async fn run(args: Args) -> Result<()> {
 async fn chat(config: &Config, runtime: &mut Runtime) -> Result<()> {
     println!(
         "Dao-Shell — 自然语言使用电脑\n/help 查看快捷入口，/quit 退出。Ctrl+C 请求停止本轮；输入提示处按 Enter 返回。\n读取范围：{}\n写入范围：{}",
-        serde_json::to_string(runtime.scope.read_roots())?,
-        serde_json::to_string(runtime.scope.write_roots())?
+        display_roots(runtime.scope.read_roots()),
+        display_roots(runtime.scope.write_roots())
     );
     let mut dialogue = match &config.model {
         Some(model) => match Dialogue::new(model, runtime) {
@@ -211,7 +200,9 @@ async fn chat(config: &Config, runtime: &mut Runtime) -> Result<()> {
             }
         },
         None => {
-            println!("尚未配置模型。可先使用 /search；配置方法见 README。");
+            println!(
+                "尚未配置模型。退出后运行 daosh setup 完成设置，再用 doctor --check-model 验证连接。可先使用 /search。"
+            );
             None
         }
     };
@@ -229,8 +220,18 @@ async fn chat(config: &Config, runtime: &mut Runtime) -> Result<()> {
         if runtime.cancel.is_cancelled() || input.is_empty() {
             continue;
         }
-        if input == "/quit" || input == "/exit" {
+        if matches!(input, "/quit" | "/exit" | "quit" | "exit" | "退出") {
             break;
+        }
+        if input == "config"
+            || input.starts_with("config ")
+            || matches!(input, "setup" | "doctor")
+            || input.starts_with("doctor ")
+        {
+            println!(
+                "这是终端命令，请先 /quit 退出，再在 PowerShell 中运行 daosh config / setup / doctor；这里只接受自然语言与 / 开头的快捷入口。"
+            );
+            continue;
         }
         let result = if input.starts_with('/') {
             shortcut(input, runtime, &mut dialogue, &mut ui)
@@ -259,7 +260,7 @@ fn shortcut(
     let (command, rest) = input.split_once(' ').unwrap_or((input, ""));
     match command {
         "/help" => println!(
-            "自然语言：找 PDF、查看资源压力、把候选移到指定目录。\n/search 关键词：不调用模型\n/open 2：打开最近结果第 2 项\n/move 1,2 C:\\绝对目录：显示移动确认\n/resources：短时资源采样\n/history：本地回执\n/reset：清除当前上下文和候选\n/quit：退出"
+            "自然语言：找 PDF、查看资源压力、把候选移到指定目录。\n/search 关键词：不调用模型\n/results：查看当前候选编号（空查询沿用上一组）\n/open 2：打开当前候选第 2 项\n/move 1,2 C:\\绝对目录：显示移动确认\n/resources：短时资源采样\n/history：本地回执\n/reset：清除当前上下文和候选\n/quit：退出（也可输入 quit、exit 或 退出）\nconfig / setup / doctor 是外部终端命令，请退出后执行。"
         ),
         "/reset" => {
             runtime.objects = Objects::default();
@@ -273,6 +274,13 @@ fn shortcut(
             let value = runtime.call("file_search", serde_json::json!({"query":rest}), ui)?;
             if let Some(d) = dialogue {
                 d.observe_local("file_search", &value);
+            }
+        }
+        "/results" => {
+            let value = runtime.current_selection()?;
+            ui.result("file_selection", &value);
+            if let Some(d) = dialogue {
+                d.observe_local("file_selection", &value);
             }
         }
         "/open" => {
@@ -308,6 +316,7 @@ fn shortcut(
                 ui.result("file_move_batch", &serde_json::to_value(op)?);
             }
         }
+        "/queit" => bail!("退出请输入 /quit（也可直接输入 quit 或 退出）"),
         _ => bail!("未知快捷入口；输入 /help 查看"),
     }
     Ok(())

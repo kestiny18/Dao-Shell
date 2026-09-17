@@ -4,6 +4,7 @@ pub mod config;
 pub mod core;
 pub mod dialogue;
 pub mod files;
+pub mod model;
 pub mod operations;
 pub mod platform;
 pub mod resources;

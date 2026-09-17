@@ -2,7 +2,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "daosh", version, about = "以自然语言操作文件、查看资源的小型智能 Shell")]
+#[command(
+    name = "daosh",
+    version,
+    about = "以自然语言操作文件、查看资源的小型智能 Shell"
+)]
 pub struct Args {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
@@ -19,6 +23,8 @@ pub struct Args {
 }
 #[derive(Subcommand)]
 pub enum Command {
+    /// 交互式设置目录和模型；保存前展示范围，不发送网络请求。
+    Setup,
     /// 不调用模型，直接搜索名称与元数据。
     Search {
         #[arg(default_value = "")]
@@ -68,8 +74,12 @@ pub enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// 检查本地范围、模型配置和数据目录，不发送网络请求。
-    Doctor,
+    /// 检查本地配置；仅 --check-model 会向模型发送固定诊断样例。
+    Doctor {
+        /// 验证工具调用及结果回传（最多两次请求，可能产生模型费用，不发送本机信息）。
+        #[arg(long)]
+        check_model: bool,
+    },
 }
 #[derive(Clone, Copy, ValueEnum)]
 pub enum SearchSort {

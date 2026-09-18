@@ -103,7 +103,7 @@ Moves currently support 1–20 ordinary files on the same volume. Existing desti
 | Input inside `dao >` | Action |
 | --- | --- |
 | `/search contract` | Search directly without a model request |
-| `/results` | Show current candidate numbers; an empty search retains the previous group with a notice |
+| `/results` | Show current candidate numbers; a new search replaces them, and no matches or a failed search clears them |
 | `/open 2` | Open the second current result |
 | `/move 1,2 C:\full\destination` | Show a move plan and wait for local confirmation |
 | `/resources` | Sample resource usage |
@@ -133,7 +133,7 @@ Operation records live under `%LOCALAPPDATA%\Dao-Shell`. Completed records are r
 
 ## Limits and feedback
 
-Search uses names and metadata only. A scan that hits time or count limits reports incomplete coverage. Resource readings are short samples, not proof of a slowdown's root cause; a few listed processes do not explain all memory usage.
+Natural-language search supports multiple terms in relative paths and file-type filters. Direct `/search` retains filename matching. Search does not read file contents, so a filename alone cannot establish a file's purpose. A scan that hits time or count limits reports incomplete coverage. Resource readings are short samples, not proof of a slowdown's root cause; a few listed processes do not explain all memory usage.
 
 An initial Windows trial with DeepSeek covered search, follow-up references, and PDF opening. Full acceptance across the 15 fixed scenarios, small file moves, and a clean Windows environment is still pending.
 

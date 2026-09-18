@@ -1,3 +1,4 @@
+use crate::presentation::{gib, human_bytes, percent};
 use crate::{
     capabilities::Interaction,
     core::{FileObject, Operation, safe_text},
@@ -99,11 +100,8 @@ pub fn render(capability: &str, value: &Value) {
                 value["items"].as_array().map_or(0, Vec::len),
                 value["elapsed_ms"]
             );
-            if value["selection_retained"] == true {
-                println!(
-                    "候选编号沿用上一组 {} 项，/open 与 /move 仍指向它们；输入 /results 可查看。",
-                    value["active_selection"].as_array().map_or(0, Vec::len)
-                );
+            if value["items"].as_array().is_some_and(Vec::is_empty) {
+                println!("当前候选编号已清空；请重新查找后使用 /open 或 /move。");
             }
             if value["has_more"] == true {
                 println!("还有其他结果，可继续翻页。");
@@ -236,32 +234,6 @@ fn local_time(value: &Value) -> String {
         })
         .unwrap_or_else(|| "未知".into())
 }
-fn percent(value: &Value) -> String {
-    match value.as_f64().filter(|n| n.is_finite() && *n >= 0.0) {
-        Some(n) if n > 0.0 && n < 0.1 => "<0.1%".into(),
-        Some(n) => format!("{n:.1}%"),
-        None => "未知".into(),
-    }
-}
-fn human_bytes(value: &Value) -> String {
-    let Some(bytes) = value.as_u64() else {
-        return "未知".into();
-    };
-    let mut size = bytes as f64;
-    let units = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut index = 0;
-    while size >= 1024.0 && index + 1 < units.len() {
-        size /= 1024.0;
-        index += 1;
-    }
-    format!("{size:.1} {}", units[index])
-}
-fn gib(v: &Value) -> String {
-    v.as_u64()
-        .map(|n| format!("{:.2}", n as f64 / 1_073_741_824.0))
-        .unwrap_or_else(|| "未知".into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

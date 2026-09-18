@@ -6,6 +6,8 @@
 
 ### 2026-09-18
 
+- Compact overlapping search roots, add multi-term relative-path matching and relevance ordering, clear numbered selections on empty or failed searches, and reuse unchanged file references.
+- Share formatted resource facts between terminal output and model explanations; clarify API-key errors and same-volume move limits.
 - Add first-run model onboarding: provider presets, hidden key input, session-only or Windows credential storage, connection repair in place, and search-directory selection before entering chat.
 - Make the default README English-first, add a separate Chinese README and bilingual getting-started guides, and translate contribution templates.
 - Align the interactive prompt with `dao >`; keep the command `daosh`, package `dao-shell`, and Chinese CLI messages.

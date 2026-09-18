@@ -284,7 +284,7 @@ fn remote_plaintext_and_url_credentials_are_rejected_before_network() {
 }
 
 #[test]
-fn empty_followup_search_keeps_the_same_visible_candidate_references() {
+fn empty_or_failed_search_clears_numbers_but_preserves_explicit_references() {
     let (_temp, mut runtime) = setup();
     let mut ui = Ui::default();
     let first = runtime
@@ -296,12 +296,13 @@ fn empty_followup_search_keeps_the_same_visible_candidate_references() {
         .call("file_search", json!({"query":"SLA-no-result"}), &mut ui)
         .unwrap();
     assert!(second["items"].as_array().unwrap().is_empty());
-    assert_eq!(second["selection_retained"], true);
-    assert_eq!(second["active_selection"], first["active_selection"]);
-    assert_eq!(runtime.last_results, selection);
-    assert_eq!(
-        runtime.current_selection().unwrap()["items"],
-        first["items"]
+    assert!(second["active_selection"].as_array().unwrap().is_empty());
+    assert!(runtime.last_results.is_empty());
+    assert!(
+        runtime.current_selection().unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
     assert!(
         runtime
@@ -312,9 +313,37 @@ fn empty_followup_search_keeps_the_same_visible_candidate_references() {
     let third = runtime
         .call("file_search", json!({"query":"合同"}), &mut ui)
         .unwrap();
-    assert_eq!(third["selection_retained"], false);
+    assert_eq!(third["items"][0]["id"], first["items"][0]["id"]);
     assert_eq!(
         runtime.last_results[0],
         third["items"][0]["id"].as_str().unwrap()
     );
+    assert!(
+        runtime
+            .call("file_search", json!({"terms":[""]}), &mut ui)
+            .is_err()
+    );
+    assert!(runtime.last_results.is_empty());
+}
+
+#[test]
+fn tool_contract_accepts_path_terms_and_returns_current_numbered_candidates() {
+    let (_temp, mut runtime) = setup();
+    let folder = runtime.scope.read_roots()[0].join("示例项目/客户端初始化");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("dump-client.sql"), "PRIVATE SQL BODY").unwrap();
+    let result = runtime.call("file_search", json!({"terms":["客户端", "初始化"], "extension":"sql", "kind":"file", "match_mode":"all"}), &mut Ui::default()).unwrap();
+    assert_eq!(result["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        result["active_selection"][0]["object_id"],
+        result["items"][0]["id"]
+    );
+    assert!(!result.to_string().contains("PRIVATE SQL BODY"));
+    runtime.cancel.cancel();
+    assert!(
+        runtime
+            .call("file_search", json!({"query":"合同"}), &mut Ui::default())
+            .is_err()
+    );
+    assert!(runtime.last_results.is_empty());
 }

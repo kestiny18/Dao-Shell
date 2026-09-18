@@ -31,6 +31,10 @@ impl Runtime {
         arguments: Value,
         ui: &mut dyn Interaction,
     ) -> Result<Value> {
+        if name == "file_search" {
+            // Clear before cancellation, decoding, and scanning can fail.
+            self.last_results.clear();
+        }
         self.cancel.check()?;
         if self.side_effects_blocked && matches!(name, "file_open" | "file_move_batch") {
             bail!("本轮的打开/移动已取消或有未知结果，需用户下一条指令；不能重复请求确认");
@@ -40,19 +44,17 @@ impl Runtime {
                 let request: Search = serde_json::from_value(arguments)?;
                 ui.progress(&format!(
                     "正在查找文件（关键词：{}）……",
-                    if request.query.is_empty() {
+                    if !request.terms.is_empty() {
+                        safe_text(&request.terms.join(" + "))
+                    } else if request.query.is_empty() {
                         "全部".into()
                     } else {
                         safe_text(&request.query)
                     }
                 ));
                 let result = files::search(&request, &self.scope, &mut self.objects, &self.cancel)?;
-                let retained = result.items.is_empty() && !self.last_results.is_empty();
-                if !result.items.is_empty() {
-                    self.last_results = result.items.iter().map(|o| o.id.clone()).collect();
-                }
+                self.last_results = result.items.iter().map(|o| o.id.clone()).collect();
                 let mut value = serde_json::to_value(result)?;
-                value["selection_retained"] = json!(retained);
                 value["active_selection"] = json!(
                     self.last_results
                         .iter()
@@ -153,15 +155,18 @@ pub fn definitions() -> Vec<Value> {
     vec![
         function(
             "file_search",
-            "在本地授权目录内查名称和元数据；不读取文件正文。返回有序候选和稳定引用；默认按修改时间从新到旧。",
+            "在授权范围内查文件名、相对路径和元数据，不读正文。优先使用 terms + extension + kind 一次表达需求（如 terms=[客户端,初始化], extension=sql, kind=file）。默认按相关度排序，文件名命中优先于父目录及更远路径。返回当前候选编号；每次搜索替换候选，零结果清空。",
             json!({
             "query":{"type":"string","description":"文件名包含的关键词；空字符串匹配全部"},
+            "terms":{"type":"array","maxItems":12,"items":{"type":"string","minLength":1,"maxLength":128},"description":"相对路径中的关键词；与 query 二选一。不要把已用扩展名表达的文件类型重复作为必需词"},
+            "match_mode":{"type":"string","enum":["all","any"],"description":"terms 默认 all（都命中）；any 表示任一命中"},
+            "kind":{"type":"string","enum":["any","file","directory"]},
             "directory":{"type":"string","description":"已授权范围内的绝对目录；省略则查询已配置根目录"},
             "extension":{"type":"string","description":"如 pdf；不带通配符"},
             "modified_after":{"type":"string","description":"RFC3339，含时区，闭区间下界"},
             "modified_before":{"type":"string","description":"RFC3339，含时区，开区间上界"},
             "min_bytes":{"type":"integer","minimum":0},"max_bytes":{"type":"integer","minimum":0},
-            "sort":{"type":"string","enum":["modified_desc","name","size_desc"]},
+            "sort":{"type":"string","enum":["relevance","modified_desc","name","size_desc"]},
             "page":{"type":"integer","minimum":0,"maximum":100},"limit":{"type":"integer","minimum":1,"maximum":50}}),
             &[],
         ),

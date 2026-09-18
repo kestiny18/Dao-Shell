@@ -111,7 +111,30 @@ pub fn snapshot(
         result["system"] = serde_json::json!({"cpu_percent":(!system.cpus().is_empty()).then_some(system.global_cpu_usage()), "memory_total_bytes":(system.total_memory()>0).then_some(system.total_memory()),
             "memory_used_bytes":(system.total_memory()>0).then_some(system.used_memory()), "memory_available_bytes":(system.total_memory()>0).then_some(system.available_memory()), "disks":disks});
     }
+    result["facts_for_explanation"] = explanation_facts(&result);
     Ok(result)
+}
+
+fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
+    use crate::presentation::{gib, human_bytes, percent};
+    use serde_json::json;
+    let processes: Vec<_> = result["processes"].as_array().into_iter().flatten().map(|p| json!({
+        "pid":p["pid"], "name":p["name"], "memory":human_bytes(&p["memory_bytes"]),
+        "cpu_total":percent(&p["cpu_percent_total"]), "cpu_one_core":percent(&p["cpu_percent_one_core"])
+    })).collect();
+    let mut facts = json!({"processes":processes, "observed_at":result["observed_at"],
+        "instruction":"直接引用这些数值和单位，不重新换算。每个结果是独立采样，不混合不同样本。仅解释短时事实，不能排除未观测的瓶颈。"});
+    if let Some(system) = result.get("system") {
+        facts["system"] = json!({"cpu_total":percent(&system["cpu_percent"]),
+            "memory_total":format!("{} GiB", gib(&system["memory_total_bytes"])),
+            "memory_used":format!("{} GiB", gib(&system["memory_used_bytes"])),
+            "memory_available":format!("{} GiB", gib(&system["memory_available_bytes"])),
+            "disks":system["disks"].as_array().into_iter().flatten().map(|d| json!({
+                "mount":d["mount"], "available":format!("{} GiB", gib(&d["available_bytes"])),
+                "total":format!("{} GiB", gib(&d["total_bytes"]))
+            })).collect::<Vec<_>>()});
+    }
+    facts
 }
 
 fn cpu_percent(before_ms: u64, after_ms: u64, elapsed_ms: f64) -> Option<f32> {
@@ -126,6 +149,18 @@ fn cpu_percent(before_ms: u64, after_ms: u64, elapsed_ms: f64) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::cpu_percent;
+    #[test]
+    fn explanation_facts_use_binary_units_and_keep_unknown_values() {
+        let facts = super::explanation_facts(&serde_json::json!({
+            "system":{"memory_total_bytes":34026878402_u64,"memory_used_bytes":24406190900_u64,"memory_available_bytes":9620687502_u64,"cpu_percent":14.2},
+            "processes":[{"pid":1,"name":"fixture","memory_bytes":824495308,"cpu_percent_total":null,"cpu_percent_one_core":0.04}]
+        }));
+        assert_eq!(facts["system"]["memory_total"], "31.69 GiB");
+        assert_eq!(facts["system"]["memory_used"], "22.73 GiB");
+        assert_eq!(facts["processes"][0]["memory"], "786.3 MiB");
+        assert_eq!(facts["processes"][0]["cpu_total"], "未知");
+        assert_eq!(facts["processes"][0]["cpu_one_core"], "<0.1%");
+    }
     #[test]
     fn cpu_uses_window_delta_and_preserves_unknown_counters() {
         assert_eq!(cpu_percent(900_000, 901_500, 1500.0), Some(100.0));

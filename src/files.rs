@@ -20,12 +20,10 @@ impl Scope {
     pub fn new(read: &[PathBuf], write: &[PathBuf]) -> Result<Self> {
         let mut all = read.to_vec();
         all.extend_from_slice(write);
-        let mut read: Vec<_> = all
+        let read: Vec<_> = all
             .iter()
             .map(|p| normalize_existing(p))
             .collect::<Result<_>>()?;
-        read.sort();
-        read.dedup();
         let write = write
             .iter()
             .map(|p| normalize_existing(p))
@@ -33,7 +31,10 @@ impl Scope {
         for path in read.iter().chain(&write) {
             ensure!(path.is_dir(), "范围必须是目录：{}", path.display());
         }
-        Ok(Self { read, write })
+        Ok(Self {
+            read: compact_roots(read),
+            write: compact_roots(write),
+        })
     }
     pub fn read_roots(&self) -> &[PathBuf] {
         &self.read
@@ -76,6 +77,22 @@ impl Scope {
         ensure!(create.len() <= 8, "一次最多创建 8 层目标目录");
         Ok((target, create))
     }
+}
+
+fn compact_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    roots.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then(a.cmp(b))
+    });
+    let mut compact: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        if !compact.iter().any(|parent| root.starts_with(parent)) {
+            compact.push(root);
+        }
+    }
+    compact
 }
 
 pub fn validate_components(path: &Path) -> Result<()> {
@@ -141,15 +158,23 @@ pub fn normalize_existing(path: &Path) -> Result<PathBuf> {
 #[derive(Default)]
 pub struct Objects {
     entries: HashMap<String, FileObject>,
+    by_path: HashMap<PathBuf, String>,
 }
 impl Objects {
     pub fn insert(&mut self, path: &Path) -> Result<FileObject> {
+        let path = normalize_existing(path)?;
+        let identity = platform::identity(&path)?;
+        if let Some(id) = self.by_path.get(&path)
+            && let Some(existing) = self.entries.get(id)
+            && existing.identity == identity
+        {
+            return Ok(existing.clone());
+        }
         ensure!(
             self.entries.len() < 2000,
             "当前会话对象已达 2000 项，请 /reset 后重新查询"
         );
-        let identity = platform::identity(path)?;
-        let modified_at = fs::metadata(path)?
+        let modified_at = fs::metadata(&path)?
             .modified()
             .ok()
             .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
@@ -161,6 +186,7 @@ impl Objects {
             modified_at,
         };
         self.entries.insert(object.id.clone(), object.clone());
+        self.by_path.insert(path, object.id.clone());
         Ok(object)
     }
     pub fn get(&self, id: &str) -> Result<&FileObject> {
@@ -180,6 +206,9 @@ impl Objects {
 #[serde(default, deny_unknown_fields)]
 pub struct Search {
     pub query: String,
+    pub terms: Vec<String>,
+    pub match_mode: MatchMode,
+    pub kind: Kind,
     pub directory: Option<PathBuf>,
     pub extension: Option<String>,
     pub modified_after: Option<String>,
@@ -194,9 +223,25 @@ pub struct Search {
 #[serde(rename_all = "snake_case")]
 pub enum Sort {
     #[default]
+    Relevance,
     ModifiedDesc,
     Name,
     SizeDesc,
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchMode {
+    #[default]
+    All,
+    Any,
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    #[default]
+    Any,
+    File,
+    Directory,
 }
 #[derive(Debug, Serialize)]
 pub struct SearchResult {
@@ -225,6 +270,18 @@ pub fn search(
     );
     ensure!(request.query.len() <= 512, "关键词过长");
     ensure!(
+        request.terms.len() <= 12
+            && request
+                .terms
+                .iter()
+                .all(|t| !t.trim().is_empty() && t.len() <= 128),
+        "terms 需为最多 12 个非空关键词，每项不超过 128 字节"
+    );
+    ensure!(
+        request.query.is_empty() || request.terms.is_empty(),
+        "query 与 terms 二选一，避免歧义"
+    );
+    ensure!(
         request
             .min_bytes
             .zip(request.max_bytes)
@@ -252,6 +309,11 @@ pub fn search(
     );
     let start = Instant::now();
     let query = request.query.to_lowercase();
+    let terms: Vec<_> = request
+        .terms
+        .iter()
+        .map(|t| t.trim().to_lowercase())
+        .collect();
     let mut found = Vec::new();
     let mut skipped = 0;
     let mut truncated = false;
@@ -301,14 +363,21 @@ pub fn search(
                 skipped += 1;
                 continue;
             }
-            if !entry
-                .file_name()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&query)
+            if matches!(request.kind, Kind::File) && !metadata.is_file()
+                || matches!(request.kind, Kind::Directory) && !metadata.is_dir()
             {
                 continue;
             }
+            let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
+            let Some(score) = match_score(
+                relative,
+                &entry.file_name().to_string_lossy(),
+                &query,
+                &terms,
+                &request.match_mode,
+            ) else {
+                continue;
+            };
             if let Some(ext) = &request.extension
                 && (metadata.is_dir()
                     || !entry.path().extension().is_some_and(|s| {
@@ -333,11 +402,16 @@ pub fn search(
                 continue;
             }
             if seen.insert(entry.path().to_owned()) {
-                found.push((entry.path().to_owned(), metadata.len(), modified));
+                found.push((entry.path().to_owned(), metadata.len(), modified, score));
             }
         }
     }
     match request.sort {
+        Sort::Relevance => found.sort_by(|a, b| {
+            b.3.cmp(&a.3)
+                .then_with(|| b.2.cmp(&a.2))
+                .then_with(|| a.0.cmp(&b.0))
+        }),
         Sort::ModifiedDesc => found.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0))),
         Sort::SizeDesc => found.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0))),
         Sort::Name => found.sort_by(|a, b| a.0.cmp(&b.0)),
@@ -345,7 +419,7 @@ pub fn search(
     let matched_in_scan = found.len();
     let offset = request.page * limit;
     let mut items = Vec::new();
-    for (path, _, _) in found.into_iter().skip(offset).take(limit) {
+    for (path, _, _, _) in found.into_iter().skip(offset).take(limit) {
         match scope.check(&path, false).and_then(|p| objects.insert(&p)) {
             Ok(item) => items.push(item),
             Err(_) => skipped += 1,
@@ -362,8 +436,46 @@ pub fn search(
         truncated,
         skipped: skipped + skipped_entries.get(),
         elapsed_ms: start.elapsed().as_millis(),
-        coverage_note: "仅在列出的目录内扫描名称和元数据；不读取正文；跳过链接/不可访问项，翻页时重新观察。",
+        coverage_note: "仅在列出的目录内扫描文件名、相对路径和元数据；不读取正文，不能据文件名确认用途；跳过链接/不可访问项，翻页时重新观察。",
     })
+}
+
+fn match_score(
+    relative: &Path,
+    name: &str,
+    query: &str,
+    terms: &[String],
+    mode: &MatchMode,
+) -> Option<usize> {
+    let name = name.to_lowercase();
+    if terms.is_empty() {
+        return name.contains(query).then_some(0);
+    }
+    let path = relative.to_string_lossy().to_lowercase();
+    let parent = relative
+        .parent()
+        .and_then(Path::file_name)
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let scores: Vec<_> = terms
+        .iter()
+        .map(|term| {
+            if name.contains(term) {
+                3
+            } else if parent.contains(term) {
+                2
+            } else if path.contains(term) {
+                1
+            } else {
+                0
+            }
+        })
+        .collect();
+    let matches = match mode {
+        MatchMode::All => scores.iter().all(|s| *s > 0),
+        MatchMode::Any => scores.iter().any(|s| *s > 0),
+    };
+    matches.then(|| scores.iter().sum())
 }
 
 pub fn open(object: &FileObject) -> Result<serde_json::Value> {

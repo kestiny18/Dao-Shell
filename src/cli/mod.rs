@@ -117,6 +117,7 @@ pub async fn run(args: Args) -> Result<()> {
                 },
                 page,
                 limit: Some(limit),
+                ..Search::default()
             };
             let result = files::search(&request, &scope, &mut objects, &cancel)?;
             let value = serde_json::to_value(&result)?;

@@ -38,7 +38,7 @@ This is a **Windows CLI development preview**, not a stable end-user release.
 - [x] File search, details, and requests to open files.
 - [x] Guarded moves for small groups of files.
 - [x] Resource sampling and natural-language interaction.
-- [x] Guided setup and an explicit model connection check.
+- [x] First-run guidance, hidden key input, optional Windows credential storage, and an in-place connection check.
 - [x] Initial Windows trial with a real model.
 - [ ] Full scenario acceptance, including file moves and resource explanations.
 - [ ] Distribution testing on a clean Windows machine.

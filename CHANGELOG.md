@@ -6,6 +6,7 @@
 
 ### 2026-09-18
 
+- Add first-run model onboarding: provider presets, hidden key input, session-only or Windows credential storage, connection repair in place, and search-directory selection before entering chat.
 - Make the default README English-first, add a separate Chinese README and bilingual getting-started guides, and translate contribution templates.
 - Align the interactive prompt with `dao >`; keep the command `daosh`, package `dao-shell`, and Chinese CLI messages.
 - 根据用户 Windows 实测改进配置：交互式 setup、保存前校验、原子替换、CMD 引号与密钥非法字符提示。

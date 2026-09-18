@@ -2,6 +2,7 @@ pub mod capabilities;
 pub mod cli;
 pub mod config;
 pub mod core;
+mod credentials;
 pub mod dialogue;
 pub mod files;
 pub mod model;

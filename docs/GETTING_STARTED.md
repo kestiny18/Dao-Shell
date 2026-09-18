@@ -22,15 +22,34 @@ Run the examples below in **PowerShell**, from the directory containing `daosh.e
 
 ## First setup
 
-Start the guided configuration:
+Run the program. If no model is configured or no usable key is available, it opens a terminal setup guide automatically:
+
+```powershell
+.\daosh.exe
+```
+
+1. Choose DeepSeek, another compatible service, or a local model. DeepSeek prefills its endpoint and `deepseek-flash`; the model ID is editable. Custom services accept a full endpoint or a service `/v1` URL; setup appends `/chat/completions` when needed.
+2. Paste your API key with hidden input. No environment-variable name is required. Press Enter to reuse an existing key; a local service can work without one.
+3. Choose whether to verify the connection. This sends up to two synthetic requests, may incur provider charges, and reads no local files. On failure, change the key, endpoint, or model in place, or retry.
+4. For a newly entered key, choose session-only use (the default) or secure storage in Windows Credential Manager. Saving it there enables reuse after restarting.
+5. Select Downloads, Documents, or custom search directories. Setup adds no write access. Existing write scope is shown and preserved; unavailable old scope can be cleared.
+6. Review the settings and enter `y` to save and continue directly into `dao >`.
+
+Use `:q`, or Ctrl+C followed by Enter, to cancel. Configuration and stored keys are unchanged until you save. Invalid directory choices can be corrected in place. You can skip the model or connection check, but skipping does not establish that a model works. Resource sampling remains available without search directories.
+
+To change settings later:
 
 ```powershell
 .\daosh.exe setup
 ```
 
-Enter readable directories, writable directories, the full model endpoint, model ID, and the **name of the API-key environment variable**, not the key itself. Directories must exist. A blank directory answer preserves that category; new paths replace it; `-` clears it. Review the settings and enter `y` to save, or `:q` to cancel. Setup makes no model requests. Run it again to change your settings.
+Saved Windows keys belong to the current user on this computer and are bound to the full endpoint and environment-variable name. Changing an endpoint does not implicitly reuse its saved key. Keys never enter JSON configuration or operation records. Lookup priority is the key entered in this process, an existing environment variable, then Windows Credential Manager. Session-only input leaves older saved credentials unchanged. To remove a saved key, delete its `Dao-Shell/model/` entry under Windows Credentials → Generic Credentials. Deleting a configuration file does not delete credentials.
 
-Alternatively, create a trial folder and configure access with commands:
+If secure storage fails, setup explicitly reports that the key remains session-only and continues the current session. Other platforms currently support session-only keys and environment variables, without credential persistence.
+
+## Manual configuration and file organization
+
+Existing commands remain available for scripts and advanced configuration. Create a disposable trial folder and grant access:
 
 ```powershell
 $demo = Join-Path $env:USERPROFILE 'Documents\DaoShellDemo'
@@ -39,22 +58,18 @@ New-Item -ItemType Directory -Force -Path $demo | Out-Null
 .\daosh.exe config add-write $demo
 ```
 
-Writable directories are also readable. A move's source and destination must both be within writable scope. Startup options `--read-root <directory>` and `--write-root <directory>` add scope for that run only. The model cannot expand these permissions.
+Writable directories are also readable. Both source and destination of a move must be within writable scope; each move still requires confirmation. Copy a few disposable files into the trial folder first.
 
-You can try search and resource sampling before connecting a model:
+Without a model, you can use:
 
 ```powershell
 .\daosh.exe search contract --in $demo
 .\daosh.exe resources --sample-ms 2000 --limit 10
 ```
 
-`--in` allows reading for that invocation only; it does not grant write access. Copy a few disposable sample files into the trial folder before testing moves.
+`--in` grants reading for that invocation, not writing. Startup options `--read-root` and `--write-root` add scope for that run only.
 
-## Connect a model
-
-Dao-Shell uses a Chat Completions compatible endpoint with function calling. Compatibility varies between providers and has not been verified for every service.
-
-Replace the placeholders below. The endpoint must be the **full request URL**, including `/chat/completions`; use your provider's actual model ID.
+Models use a Chat Completions compatible endpoint with tool calling; compatibility requires verification per service. Remote endpoints require HTTPS and a key; local loopback services may use HTTP without a key. Environment-variable configuration still works:
 
 ```powershell
 .\daosh.exe config model --endpoint 'https://your-provider.example/v1/chat/completions' --model 'your-model-id'
@@ -64,11 +79,7 @@ $env:DAO_SHELL_API_KEY = [Net.NetworkCredential]::new('', $secret).Password.Trim
 .\daosh.exe
 ```
 
-`API Key` is just the input label: paste the key at the prompt that appears after running the command. The environment variable lasts for this PowerShell process and its children; set it again in a new terminal. If you chose a different variable name during setup, use that name instead.
-
-Remote endpoints require HTTPS and a key. A local endpoint such as `http://127.0.0.1:<port>/v1/chat/completions` can work without a key. Configuration is validated before saving. Leading and trailing key whitespace is trimmed; invalid characters or internal whitespace are rejected before sending a request, without printing the key.
-
-Keys are read from environment variables, not written to configuration or operation records. Normal conversations send your input, selected file names and metadata, and resource samples to the configured provider. This version does not read file contents, process command lines, or process environments. Exiting ends the session; no task continues in the background.
+That environment variable lasts for the current PowerShell process and its children. Normal conversations send user input, candidate file names and metadata, and resource samples to your provider. Dao-Shell does not read file contents, process command lines, or process environments. Exiting ends the session without background work.
 
 ## Start a conversation
 

@@ -80,19 +80,16 @@ impl Assistant {
 
 impl ModelClient {
     pub fn new(config: &ModelConfig) -> Result<Self> {
+        let key = crate::credentials::resolve(config)?;
+        Self::with_key(config, key.as_deref())
+    }
+
+    pub(crate) fn with_key(config: &ModelConfig, key: Option<&str>) -> Result<Self> {
         let endpoint = config.validate()?;
-        let key = if config.api_key_env.is_empty() {
-            None
-        } else {
-            match std::env::var(&config.api_key_env) {
-                Ok(value) => authorization(&value)?,
-                Err(std::env::VarError::NotPresent) => None,
-                Err(_) => bail!("API Key 环境变量不是有效文本；请重新输入密钥"),
-            }
-        };
+        let key = key.map(authorization).transpose()?.flatten();
         ensure!(
             is_loopback(&endpoint) || key.is_some(),
-            "未设置 API Key 环境变量 {}；请在启动 Dao-Shell 的同一终端设置，不要将密钥写入配置",
+            "未找到 API Key；运行 daosh setup 输入密钥，或设置环境变量 {}",
             config.api_key_env
         );
         let client = Client::builder()
@@ -226,6 +223,13 @@ pub async fn check_connection(
     cancel: &Cancellation,
 ) -> Result<ConnectionCheck> {
     let client = ModelClient::new(config)?;
+    check_client(&client, cancel).await
+}
+
+pub(crate) async fn check_client(
+    client: &ModelClient,
+    cancel: &Cancellation,
+) -> Result<ConnectionCheck> {
     let started = Instant::now();
     let tools = json!([{"type":"function","function":{
         "name":"dao_shell_connection_check","description":"Return a fixed synthetic connection check result.",

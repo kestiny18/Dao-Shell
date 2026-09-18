@@ -13,7 +13,7 @@
 | 操作记录 | SQLite 写前记录、逐项回执、重启只观察不重放、Unknown 阻止重复修改、单数据目录实例锁、已完成记录 7 天保留 |
 | 资源 | 两次累积 CPU 时间差采样、CPU/内存/磁盘空间、进程排序；缺失与新进程样本保留未知；不读取命令行和环境 |
 | 交付 | Cargo 包、开发与打包脚本、Windows/Ubuntu CI 定义 |
-| 首次使用 | setup 交互式设置、保存前校验与原子替换、doctor 本地诊断及显式模型协议检查 |
+| 首次使用 | 缺少模型或密钥时自动引导、服务预设、隐藏密钥输入、可选 Windows 凭据保存、原地连接验证与修正、读取目录选择、保存后进入对话 |
 
 ## 实现取舍
 
@@ -21,7 +21,7 @@
 2. 模型调用“打开”时本地选择具体对象；用户直接使用 `/open N` 或 `search --open N` 时直接提交。没有引入自然语言权限分类器。
 3. Windows 目录句柄使用读取目录权限并拒绝共享删除。回归测试证明只读取属性不足以阻止目录改名，已据此修正。移动用 `SetFileInformationByHandle`，禁止覆盖；复核文件身份、大小和修改时间。
 4. 资源证据是短时观测，不承诺完整卡顿诊断；新出现或无法观察的进程不会被伪装成有效 CPU 零值。
-5. 兼容服务的 API 差异仍需逐个验证。当前没有绑定默认供应商或模型，远程凭据不进入仓库。
+5. 兼容服务的 API 差异仍需逐个验证。向导提供可编辑的 DeepSeek 预设，仍支持自定义与本地服务；只有用户选择并保存后才启用。凭据不进入配置 JSON、操作记录或仓库。
 6. 未加入应用安装、Noval 依赖、桌面 GUI、插件框架或通用任务系统。
 
 ## 验证与待验收
@@ -32,7 +32,7 @@
 
 还需完成：干净 Windows 11 x64 环境解压运行、默认应用打开的可复现验收、权限不足/跨卷等平台检查，以及完整自然语言场景验收。Windows 和 Ubuntu 的首轮[托管 CI 已通过](https://github.com/kestiny18/Dao-Shell/actions/runs/35076532346)，其中 Windows 还执行了 Clippy。Ubuntu 的编译与测试通过不代表完整桌面功能已验收；Linux/macOS 不作为当前完成声明。
 
-本机已通过 38 个自动化测试和 Clippy（警告视为错误），包括目的目录被替换时使确认失效、批次中第二项失败时保留第一项成功及第三项未开始。命令行搜索、500ms 资源采样及 Windows junction 排除也已实跑：目录中的 junction 被跳过，显式把 junction 配为读取根会被拒绝；管道中的 y 不会批准移动。资源采样总耗时包括枚举开销，可能大于指定间隔。可用 `scripts/smoke-windows.ps1` 复现入口检查。
+本机已通过 43 个自动化测试和 Clippy（警告视为错误），包括目的目录被替换时使确认失效、批次中第二项失败时保留第一项成功及第三项未开始。命令行搜索、500ms 资源采样及 Windows junction 排除也已实跑：目录中的 junction 被跳过，显式把 junction 配为读取根会被拒绝；管道中的 y 不会批准移动。资源采样总耗时包括枚举开销，可能大于指定间隔。可用 `scripts/smoke-windows.ps1` 复现入口检查。
 
 当前 CLI 在等待输入时收到 Ctrl+C，需要 Enter 结束这一行；采样和 HTTP 请求可响应取消。操作结果未知时不会自动补偿或回滚。
 
@@ -52,3 +52,5 @@
 - `src/resources.rs`：资源采样。
 
 参考：[工具调用协议](https://developers.openai.com/api/docs/guides/function-calling)、[Windows 文件重命名结构](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)、[按句柄设置信息](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle)、[sysinfo](https://docs.rs/sysinfo/latest/sysinfo/)。
+
+2026-09-18 首次配置向导验证：本机 43 项自动测试、格式检查及 Clippy 通过。Windows 终端实走了首次启动、取消、隐藏密钥输入、仅本次使用、跳过网络验证、目录选择、保存并直接进入对话；退出后本地 doctor 确认临时密钥不再可用，JSON 配置不含密钥。凭据管理器读写使用唯一的虚构测试条目，测试后删除。连接失败后修正密钥的流程使用本地 HTTP 模拟服务验证，不代表真实服务或干净 Windows 环境已完成验收。

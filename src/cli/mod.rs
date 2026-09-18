@@ -17,7 +17,7 @@ use crate::{
     storage::Journal,
 };
 use anyhow::{Context, Result, bail};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 pub async fn run(args: Args) -> Result<()> {
     let config_path = args.config.unwrap_or_else(Config::path);
@@ -26,8 +26,20 @@ pub async fn run(args: Args) -> Result<()> {
     let cancel = Cancellation::default();
     let signal = cancel.clone();
     ctrlc::set_handler(move || signal.cancel())?;
-    if matches!(args.command, Some(Command::Setup)) {
-        return setup::run(&config, &config_path, &cancel);
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    let needs_setup = args.command.is_none()
+        && interactive
+        && config
+            .model
+            .as_ref()
+            .is_none_or(|model| crate::model::ModelClient::new(model).is_err());
+    if matches!(args.command, Some(Command::Setup))
+        || (args.command.is_none() && interactive && needs_setup)
+    {
+        match setup::run(&config, &config_path, &cancel).await? {
+            Some(next) => config = next,
+            None => return Ok(()),
+        }
     }
     if let Some(Command::Config { action }) = args.command {
         match action {

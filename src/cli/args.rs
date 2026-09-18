@@ -23,7 +23,7 @@ pub struct Args {
 }
 #[derive(Subcommand)]
 pub enum Command {
-    /// 交互式设置目录和模型；保存前展示范围，不发送网络请求。
+    /// 引导连接模型、输入密钥和选择目录；可选择发送固定样例验证连接。
     Setup,
     /// 不调用模型，直接搜索名称与元数据。
     Search {
@@ -69,7 +69,7 @@ pub enum Command {
         #[arg(long)]
         clear: bool,
     },
-    /// 本地配置；API Key 只从环境变量读取。
+    /// 本地配置；密钥可通过 setup 输入，或从环境变量、Windows 凭据读取。
     Config {
         #[command(subcommand)]
         action: ConfigAction,

@@ -4,6 +4,13 @@
 
 ## Unreleased — 第一版公开开发预览
 
+### 2026-09-19
+
+- Report independently verifiable move blockers together before creating a plan, including missing write scope, cross-volume moves, existing targets and unresolved operations. Keep all diagnostic reads within the configured read scope.
+- Add an isolated file-inventory experiment: persistent metadata snapshots, literal multi-term queries, atomic rebuilds, coverage reporting and a read-only Windows USN capability probe. This is not the production search backend or a live index.
+- Add repeatable Windows fixture checks for restart, directory rename, deletion, junction exclusion and query timings. Record the staged inventory / desktop / shared-core exploration in the roadmap.
+- Make the onboarding mock HTTP server explicitly use blocking accepted sockets on Windows to avoid intermittent fixture failures.
+
 ### 2026-09-18
 
 - Compact overlapping search roots, add multi-term relative-path matching and relevance ordering, clear numbered selections on empty or failed searches, and reuse unchanged file references.

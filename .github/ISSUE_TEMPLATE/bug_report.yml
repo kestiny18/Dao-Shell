@@ -1,34 +1,34 @@
-name: 使用问题 / Bug report
-description: 提供复现步骤，帮助我们改进早期体验。
-title: "[问题] "
+name: Bug report
+description: Help improve the preview with reproducible steps. English or Chinese welcome.
+title: "[Bug] "
 body:
   - type: markdown
     attributes:
-      value: "请勿提交 API Key、个人文件内容或未脱敏的完整日志。"
+      value: "Do not include API keys, private file contents, or unsanitized logs."
   - type: input
     id: environment
     attributes:
-      label: 系统与程序版本
-      placeholder: Windows 11 / commit 或版本号
+      label: Operating system and program version
+      placeholder: Windows 11 / commit or version number
     validations:
       required: true
   - type: input
     id: model
     attributes:
-      label: 模型服务与模型 ID（如适用，不要填密钥）
+      label: Model provider and model ID (if applicable; no API keys)
   - type: textarea
     id: steps
     attributes:
-      label: 如何复现？
+      label: Steps to reproduce
     validations:
       required: true
   - type: textarea
     id: result
     attributes:
-      label: 预期结果与实际结果
+      label: Expected and actual behavior
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
-      label: 脱敏后的错误或截图
+      label: Sanitized errors or screenshots

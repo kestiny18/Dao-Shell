@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title description">
+  <title id="title">Dao-Shell — Say what you want to do</title>
+  <desc id="description">Interaction concept, not a screenshot. Find files, review a move plan, and confirm locally. The current product is a CLI development preview.</desc>
+  <rect width="1280" height="620" rx="24" fill="#f4f3ee"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+    <rect x="54" y="52" width="44" height="44" rx="12" fill="#1d5146"/>
+    <path d="M65 65l9 9-9 9m15 0h9" stroke="#f4f3ee" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="114" y="82" font-size="25" font-weight="700" fill="#17362f">Dao-Shell</text>
+    <text x="55" y="191" font-size="43" font-weight="700" fill="#17362f">Less pathfinding.</text>
+    <text x="55" y="251" font-size="43" font-weight="700" fill="#17362f">More doing.</text>
+    <text x="56" y="311" font-size="21" fill="#5b6a62">Find files. Review actions. See results.</text>
+    <text x="56" y="347" font-size="21" fill="#5b6a62">Find. Confirm. Follow through.</text>
+    <rect x="56" y="398" width="120" height="35" rx="17" fill="#e0e8df"/>
+    <text x="116" y="422" text-anchor="middle" font-size="15" fill="#285448">LLM-first</text>
+    <rect x="188" y="398" width="126" height="35" rx="17" fill="#e0e8df"/>
+    <text x="251" y="422" text-anchor="middle" font-size="15" fill="#285448">Windows first</text>
+    <text x="56" y="551" font-size="15" fill="#617169" letter-spacing="2">BUILDING IN PUBLIC</text>
+    <text x="56" y="578" font-size="14" fill="#76847a">A small entry point for everyday tasks.</text>
+    <rect x="518" y="46" width="708" height="528" rx="18" fill="#182b27"/>
+    <circle cx="546" cy="76" r="5" fill="#6f9181"/>
+    <circle cx="565" cy="76" r="5" fill="#536f61"/>
+    <circle cx="584" cy="76" r="5" fill="#536f61"/>
+    <text x="1197" y="81" text-anchor="end" font-size="13" fill="#a1b7a9">Concept · CLI development preview</text>
+    <line x1="518" y1="103" x2="1226" y2="103" stroke="#334b41"/>
+    <text x="552" y="147" font-size="14" fill="#94bea6">01 / SAY WHAT YOU NEED</text>
+    <text x="552" y="188" font-size="24" fill="#f3f5ed">“Find contracts in Downloads.”</text>
+    <text x="552" y="226" font-size="18" fill="#b3c4b9">1. contract.pdf</text>
+    <text x="770" y="226" font-size="18" fill="#b3c4b9">2. lease.pdf</text>
+    <line x1="552" y1="253" x2="1192" y2="253" stroke="#334b41"/>
+    <text x="552" y="289" font-size="14" fill="#94bea6">02 / FOLLOW UP</text>
+    <text x="552" y="330" font-size="24" fill="#f3f5ed">“Move the first one into Archive.”</text>
+    <text x="552" y="369" font-size="18" fill="#b3c4b9">contract.pdf  →  Archive / contract.pdf</text>
+    <line x1="552" y1="396" x2="1192" y2="396" stroke="#334b41"/>
+    <text x="552" y="432" font-size="14" fill="#94bea6">03 / REVIEW, THEN CONFIRM</text>
+    <text x="552" y="474" font-size="22" fill="#f3f5ed">Move 1 file?</text>
+    <rect x="552" y="500" width="150" height="40" rx="7" fill="#c6e5b5"/>
+    <text x="627" y="527" text-anchor="middle" font-size="17" font-weight="600" fill="#183d2e">Your call</text>
+    <text x="719" y="526" font-size="16" fill="#a1b7a9">Then see what actually happened.</text>
+  </g>
+</svg>

@@ -1,22 +1,22 @@
-name: 一个真实使用场景 / Use case
-description: 说说你想让电脑帮你完成什么。
-title: "[场景] "
+name: Use case
+description: Tell us what you want to do with your computer. English or Chinese welcome.
+title: "[Use case] "
 body:
   - type: textarea
     id: task
     attributes:
-      label: 你想完成什么？
-      description: 用一个具体的电脑操作场景描述。
+      label: What do you want to accomplish?
+      description: Describe a concrete computer-use situation.
     validations:
       required: true
   - type: textarea
     id: current
     attributes:
-      label: 现在怎么做，哪一步最麻烦？
+      label: How do you do it today, and which step is frustrating?
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: 你希望怎样交互？
-      description: 可以写一句你想对 Dao-Shell 说的话，或描述需要哪些确认。
+      label: How would you like to interact?
+      description: Write something you would say to Dao-Shell, or describe the confirmations you need.

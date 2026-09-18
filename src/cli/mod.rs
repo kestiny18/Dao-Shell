@@ -210,7 +210,7 @@ async fn chat(config: &Config, runtime: &mut Runtime) -> Result<()> {
     loop {
         runtime.cancel.reset();
         runtime.side_effects_blocked = false;
-        print!("\n你 > ");
+        print!("\ndao > ");
         io::stdout().flush()?;
         let mut input = String::new();
         if io::stdin().read_line(&mut input)? == 0 {

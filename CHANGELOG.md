@@ -6,6 +6,8 @@
 
 ### 2026-09-18
 
+- Make the default README English-first, add a separate Chinese README and bilingual getting-started guides, and translate contribution templates.
+- Align the interactive prompt with `dao >`; keep the command `daosh`, package `dao-shell`, and Chinese CLI messages.
 - 根据用户 Windows 实测改进配置：交互式 setup、保存前校验、原子替换、CMD 引号与密钥非法字符提示。
 - 增加显式模型连接诊断，验证工具调用和结果回传；固定样例不包含本机文件或资源信息。
 - 修正 Windows 进程 CPU 首次采样偏低；显示整机口径、合理小数位和可用内存。

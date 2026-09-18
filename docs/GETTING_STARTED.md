@@ -1,24 +1,36 @@
-# 体验 Dao-Shell
+# Try Dao-Shell
 
-这是 Windows 命令行开发预览，适合愿意反馈问题的早期使用者。请先用单独的试用目录体验文件整理。
+[English](GETTING_STARTED.md) · [简体中文](GETTING_STARTED.zh-CN.md)
 
-## 获取程序
+This Windows CLI development preview is for early users willing to share feedback. The interface currently uses Chinese. Start with disposable files in a separate trial folder.
 
-当前尚未发布正式下载版本。先按 [开发指南](DEVELOPMENT.md) 从源码构建；构建后程序在 `target/release/daosh.exe`，打包目录在 `dist/daosh-0.1.0-windows-x64/`。后续下载入口会放在 [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases)，并标明验证范围。
+## Get the program
 
-下面的示例需要 **PowerShell**，在 `daosh.exe` 所在目录运行。如果当前提示符是 `C:\...>` 而非 `PS C:\...>`，先输入 `powershell`。CMD 不会按 PowerShell 规则处理单引号。
+There is no official download release yet. With Git, Rust, and the appropriate Windows linker toolchain installed, build from source:
 
-## 第一次启动
+```powershell
+git clone https://github.com/kestiny18/Dao-Shell.git
+Set-Location Dao-Shell
+cargo build --release --locked
+Set-Location target\release
+.\daosh.exe --help
+```
 
-推荐先运行交互式设置，不用记住配置参数：
+The [development guide](DEVELOPMENT.md) (Chinese) describes the toolchain and a local Windows bootstrap option. Future downloads will appear on [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases), with their verification scope stated.
+
+Run the examples below in **PowerShell**, from the directory containing `daosh.exe`. If your prompt is `C:\...>` instead of `PS C:\...>`, enter `powershell` first. CMD handles single quotes differently.
+
+## First setup
+
+Start the guided configuration:
 
 ```powershell
 .\daosh.exe setup
 ```
 
-逐项输入读取目录、可写目录、模型的完整接口地址、模型 ID 和密钥环境变量名。目录必须存在；回车保留原范围，输入新目录会替换该类范围，`-` 清空。保存前会展示全部范围，输入 `y` 才保存；`:q` 取消。这里**不输入 API Key 本身**，也不会自动请求模型。更改设置时可再次运行 `setup`。
+Enter readable directories, writable directories, the full model endpoint, model ID, and the **name of the API-key environment variable**, not the key itself. Directories must exist. A blank directory answer preserves that category; new paths replace it; `-` clears it. Review the settings and enter `y` to save, or `:q` to cancel. Setup makes no model requests. Run it again to change your settings.
 
-也可以使用独立命令。创建一个试用目录，再告诉 Dao-Shell 可以访问哪些位置：
+Alternatively, create a trial folder and configure access with commands:
 
 ```powershell
 $demo = Join-Path $env:USERPROFILE 'Documents\DaoShellDemo'
@@ -27,68 +39,70 @@ New-Item -ItemType Directory -Force -Path $demo | Out-Null
 .\daosh.exe config add-write $demo
 ```
 
-可读与可写范围分开设置；可写目录同时允许查询。目录必须存在。你也可以用启动参数 `--read-root <目录>`、`--write-root <目录>` 仅为本次运行增加范围，模型不能自行扩大它们。
+Writable directories are also readable. A move's source and destination must both be within writable scope. Startup options `--read-root <directory>` and `--write-root <directory>` add scope for that run only. The model cannot expand these permissions.
 
-先不配置模型，也能试一下搜索和资源观测：
+You can try search and resource sampling before connecting a model:
 
 ```powershell
-.\daosh.exe search 合同 --in "$env:USERPROFILE\Downloads" --extension pdf
+.\daosh.exe search contract --in $demo
 .\daosh.exe resources --sample-ms 2000 --limit 10
 ```
 
-`--in` 只授权本次读取，不添加写入权限。第一次体验移动时，请手动把几个不重要的样例文件复制到试用目录。
+`--in` allows reading for that invocation only; it does not grant write access. Copy a few disposable sample files into the trial folder before testing moves.
 
-## 接入模型
+## Connect a model
 
-当前实现使用支持 function calling 的 Chat Completions 兼容接口。真实服务的兼容性尚未逐一验证，不承诺所有兼容端点都可用。
+Dao-Shell uses a Chat Completions compatible endpoint with function calling. Compatibility varies between providers and has not been verified for every service.
 
-`--endpoint` 是包含 `/chat/completions` 的完整请求地址，`--model` 使用服务商的实际模型 ID。替换下列占位值：
+Replace the placeholders below. The endpoint must be the **full request URL**, including `/chat/completions`; use your provider's actual model ID.
 
 ```powershell
-.\daosh.exe config model --endpoint 'https://你的服务地址/v1/chat/completions' --model '实际模型 ID'
+.\daosh.exe config model --endpoint 'https://your-provider.example/v1/chat/completions' --model 'your-model-id'
 $secret = Read-Host 'API Key' -AsSecureString
 $env:DAO_SHELL_API_KEY = [Net.NetworkCredential]::new('', $secret).Password.Trim()
 .\daosh.exe doctor --check-model
 .\daosh.exe
 ```
 
-OpenAI 官方接口地址为 `https://api.openai.com/v1/chat/completions`；其他服务按其文档填写。本地服务可用 `http://127.0.0.1:<端口>/v1/chat/completions`，无需密钥。远程服务要求 HTTPS。
+`API Key` is just the input label: paste the key at the prompt that appears after running the command. The environment variable lasts for this PowerShell process and its children; set it again in a new terminal. If you chose a different variable name during setup, use that name instead.
 
-`Read-Host 'API Key'` 中的文字只是提示，**运行后，在随后出现的输入提示中粘贴密钥**，不要把密钥写进命令。密钥仅在当前 PowerShell 进程及其子进程有效，换终端后要重新设置。程序会去掉首尾空白；内部空白或非法字符会在发请求前明确报错，不显示密钥内容。
+Remote endpoints require HTTPS and a key. A local endpoint such as `http://127.0.0.1:<port>/v1/chat/completions` can work without a key. Configuration is validated before saving. Leading and trailing key whitespace is trimmed; invalid characters or internal whitespace are rejected before sending a request, without printing the key.
 
-配置命令保存前会校验地址和参数。仅填写服务首页、带入 CMD 单引号等情况会给出修正提示；保存失败时保留原配置。
+Keys are read from environment variables, not written to configuration or operation records. Normal conversations send your input, selected file names and metadata, and resource samples to the configured provider. This version does not read file contents, process command lines, or process environments. Exiting ends the session; no task continues in the background.
 
-密钥仅从环境变量读取，不写入配置或操作记录。用户输入、候选文件的名称与元数据、资源样本会发往配置的模型服务；首版不读取文件正文、进程命令行或环境变量。会话在退出时结束，不会继续后台工作。
+## Start a conversation
 
-## 开始交谈
+The input prompt is `dao >`. The following Chinese examples mean: find contract files in the trial folder, open the second result, preview moving the first result into an archive folder, and explain current resource pressure.
 
 ```text
-找试用目录中的合同文件。
-打开第二个。
-把第一个移到试用目录的归档文件夹，先给我看方案。
-查看当前资源压力，解释可能原因。
+dao > 找试用目录中的合同文件。
+dao > 打开第二个。
+dao > 把第一个移到试用目录的归档文件夹，先给我看方案。
+dao > 查看当前资源压力，解释可能原因。
 ```
 
-打开和移动会在本地展示具体对象。移动方案包含来源、目的地和将创建的目录，输入 `y` 才执行。用户直接使用 `/open 2` 时，表示已经选择打开最近结果的第二项。
+English requests depend on your model and have not yet completed acceptance testing. CLI messages remain in Chinese.
 
-移动暂限同卷的 1–20 个普通文件；不覆盖已有目标，不移动目录、不跟随链接。不支持的动作会报错。取消只停止后续步骤，不撤回已经完成的修改。
+Opening and moving show the concrete objects locally. A move plan shows sources, destinations, and directories to create, and requires `y` before execution. `/open 2` directly selects the second current result for opening.
 
-## 常用入口
+Moves currently support 1–20 ordinary files on the same volume. Existing destinations are not overwritten; directory moves and following links are unsupported. Cancellation stops later steps and does not undo completed changes. An accepted open request means the operating system accepted the handoff, not that the application has displayed the document.
 
-| 输入 | 作用 |
+## Useful commands
+
+| Input inside `dao >` | Action |
 | --- | --- |
-| `/search 合同` | 不请求模型，直接搜索 |
-| `/results` | 查看当前候选编号；空查询保留上一组并明确提示 |
-| `/open 2` | 打开当前候选的第二项 |
-| `/move 1,2 C:\完整目的目录` | 展示移动方案，等待本地确认 |
-| `/resources` | 采样当前资源 |
-| `/history` | 查看本地操作回执 |
-| `/reset` | 清除当前对话与候选；保留操作记录 |
-| `/quit`、`quit`、`exit`、`退出` | 退出 |
+| `/search contract` | Search directly without a model request |
+| `/results` | Show current candidate numbers; an empty search retains the previous group with a notice |
+| `/open 2` | Open the second current result |
+| `/move 1,2 C:\full\destination` | Show a move plan and wait for local confirmation |
+| `/resources` | Sample resource usage |
+| `/history` | Show local operation receipts |
+| `/reset` | Clear the conversation and candidates, keeping operation records |
+| `/quit`, `quit`, `exit`, `退出` | Exit |
 
-模型连接失败后仍可使用这些入口；不会把自然语言请求悄悄降级成关键词搜索。`Ctrl+C` 请求停止本轮；在等待输入或确认时，再按 Enter 返回。
+These commands remain available after a model connection failure. Natural-language requests are not silently converted to keyword searches. `Ctrl+C` requests cancellation; when waiting for input or confirmation, also press Enter to return.
 
-独立命令还包括：
+Run these commands from PowerShell, outside the conversation:
 
 ```powershell
 .\daosh.exe doctor
@@ -98,16 +112,20 @@ OpenAI 官方接口地址为 `https://api.openai.com/v1/chat/completions`；其�
 .\daosh.exe search --help
 ```
 
-`config`、`setup` 和 `doctor` 是外部终端命令，不是在 `你 >` 中输入的对话。误输时会提示退出后执行，不转发给模型。
+`config`, `setup`, and `doctor` are terminal commands. If entered into the conversation, they produce guidance rather than being forwarded to the model.
 
-`doctor` 默认不发送模型请求，逐项检查目录与模型本地配置。**`doctor --check-model` 才会发送最多两次模型请求，可能产生费用**：只使用固定虚构样例，检查工具调用和结果回传，不读取本机文件、目录内容、资源指标或操作记录。成功时显示总耗时和服务报告的 token 数（缺失时显示“未提供”），不代表真实文件场景已验收。错误会区分密钥字符、HTTP 鉴权/权限/地址/限流/服务故障、连接失败或超时；连接错误不凭猜测进一步归因为 DNS 或 TLS。
+By default, `doctor` checks local configuration without model requests. **`doctor --check-model` sends up to two requests and may incur provider charges.** It uses a fixed synthetic example to check tool calling and result submission, without reading local files, directory contents, resource metrics, or operation records. It reports elapsed time and provider-reported token usage when available. Passing this check does not verify real file workflows.
 
-操作记录位于 `%LOCALAPPDATA%\Dao-Shell`，已完成记录保留 7 天，待核对记录不会自动清除；重启只核对已知对象，不重做上次操作。`history --clear` 需本地确认。
+Diagnostics distinguish invalid key characters, HTTP authentication or permission errors, endpoint errors, rate limits, server failures, connection failures, and timeouts. A connection failure does not establish a particular DNS or TLS cause.
 
-## 已知限制与反馈
+Operation records live under `%LOCALAPPDATA%\Dao-Shell`. Completed records are retained for seven days; unresolved records are kept. Restarting checks known objects without replaying the previous operation. Clearing history requires local confirmation.
 
-文件搜索只看名称和元数据；扫描达到时间或数量限制会说明覆盖不足。资源观测是短时样本，不能证明完整卡顿根因。打开成功仅表示系统接受了请求，不保证应用已经显示文档。
+## Limits and feedback
 
-已有用户在 Windows 上用 DeepSeek 完成首轮真实查找、指代和 PDF 打开；这不代表所有模型兼容，也不代表完整试用验收。15 个固定场景、小批量移动和干净 Windows 环境验证仍待完成。遇到问题，可在 [Issues](https://github.com/kestiny18/Dao-Shell/issues/new/choose) 提供操作步骤和脱敏后的错误信息，不要粘贴 API Key 或个人文件内容。
+Search uses names and metadata only. A scan that hits time or count limits reports incomplete coverage. Resource readings are short samples, not proof of a slowdown's root cause; a few listed processes do not explain all memory usage.
 
-[回到项目](../README.md) · [当前验证记录](IMPLEMENTATION.md)
+An initial Windows trial with DeepSeek covered search, follow-up references, and PDF opening. Full acceptance across the 15 fixed scenarios, small file moves, and a clean Windows environment is still pending.
+
+[Report an issue](https://github.com/kestiny18/Dao-Shell/issues/new/choose) with reproduction steps and sanitized errors. Do not include API keys or private file contents.
+
+[Back to the project](../README.md) · [Verification record](IMPLEMENTATION.md) (Chinese)

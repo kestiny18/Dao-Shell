@@ -1,10 +1,10 @@
 # Dao-Shell 文档
 
-[简体中文](README.md) · [English](README.en.md) · [返回项目首页](../README.md)
+[简体中文](README.md) · [English](README.en.md) · [返回项目首页](../README.zh-CN.md)
 
 ## 使用
 
-- [体验指南](GETTING_STARTED.md)：构建、首次配置、模型接入与安全试用。
+- [体验指南](GETTING_STARTED.zh-CN.md)：构建、首次配置、模型接入与安全试用。
 - [路线图](../ROADMAP.md)：当前优先级与后续方向。
 - [更新记录](../CHANGELOG.md)：版本级变化。
 

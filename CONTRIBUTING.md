@@ -1,21 +1,25 @@
-# 参与 Dao-Shell
+# Contributing to Dao-Shell
 
-最欢迎的是具体使用场景：你想完成什么电脑操作，现在怎么做，哪一步最麻烦。可以用中文或英文提交 [Issue](https://github.com/kestiny18/Dao-Shell/issues/new/choose)。
+Dao-Shell is an early project built around real computer-use situations. Feedback in English or Chinese is welcome.
 
-## 报告问题
+## Start with a concrete situation
 
-说明 Windows 版本、程序版本、复现步骤、预期与实际结果。如果使用模型，提供服务名称和模型 ID 即可，不要提供 API Key。日志、文件名和路径请先脱敏。
+[Open an issue](https://github.com/kestiny18/Dao-Shell/issues/new/choose) describing what you wanted to do, how you do it today, and where the experience became frustrating. For a bug, include your Windows and program version, reproduction steps, and expected versus actual behavior. If relevant, name the model provider and model ID, without the API key. Remove private paths and file contents from logs and screenshots.
 
-## 提交改动
+Read the [project introduction](README.md) and [roadmap](ROADMAP.md) before proposing a major feature. Discuss changes to product scope first; small fixes can go directly into a pull request.
 
-先看 [产品范围](README.md) 与 [路线图](ROADMAP.md)。影响产品边界、增加新能力或大范围重构时，先用 Issue 讨论。小修复、文案和复现用例可以直接提交 PR。
+## Making a change
 
-开发环境与检查命令见 [开发指南](docs/DEVELOPMENT.md)。PR 说明用户会看到什么变化，以及怎样验证。文件操作测试只使用临时夹具；不要把真实模型调用放进默认测试。
+Keep each change focused. Explain the user-visible behavior and how you verified it. The [development guide](docs/DEVELOPMENT.md) (Chinese) covers the local toolchain and checks.
 
-当前优先关注：真实模型兼容性、第一次使用、Windows 操作的可验证结果。模型文字不能替代本地授权、确认或执行证据。
+Use isolated fixtures when testing file operations. Real-model calls are not part of the default automated test suite. Model-generated text must never serve as evidence of user permission.
 
-## 公开开发
+Use English for new code identifiers, comments, commit messages, and pull request descriptions. The CLI currently uses Chinese; repository language changes do not require UI translation or a localization framework.
 
-我们会记录进展和失败，不把规划、交互示意或模拟服务测试写成已经验证的产品体验。使用 AI 辅助开发可以说明采用方式；提交者仍需理解和验证改动。
+## Building in public
 
-项目采用 [Apache License 2.0](LICENSE)。除非明确另行说明，提交给本项目的贡献也按该许可证提供。
+Share what you actually tested, what failed, and what remains uncertain. Label mockups and proposed experiences clearly. AI-assisted contributions are welcome; contributors remain responsible for reviewing the changes and providing verification evidence.
+
+## License
+
+By contributing, you agree that your contributions are licensed under the project's [Apache License 2.0](LICENSE).

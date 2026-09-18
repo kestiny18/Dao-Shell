@@ -1,6 +1,6 @@
 # 开发指南
 
-产品介绍见 [README](../README.md)，初次试用见 [体验指南](GETTING_STARTED.md)。
+产品介绍见 [README](../README.zh-CN.md)，初次试用见 [体验指南](GETTING_STARTED.zh-CN.md)。
 
 ## 获取与构建
 

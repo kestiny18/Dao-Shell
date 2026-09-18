@@ -8,9 +8,11 @@ if (-not $project) { throw 'Project metadata not found' }
 $version = $project.version
 $package = Join-Path $workspace "dist\daosh-$version-windows-x64"
 New-Item -ItemType Directory -Force -Path $package | Out-Null
+$legacyReadme = Join-Path $package 'README.en.md'
+if (Test-Path -LiteralPath $legacyReadme) { Remove-Item -LiteralPath $legacyReadme }
 Copy-Item -LiteralPath (Join-Path $workspace 'target\release\daosh.exe') -Destination $package
 Copy-Item -LiteralPath (Join-Path $workspace 'README.md') -Destination $package
-foreach ($name in @('README.en.md', 'ROADMAP.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE')) {
+foreach ($name in @('README.zh-CN.md', 'ROADMAP.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE')) {
     $document = Join-Path $workspace $name
     if (Test-Path -LiteralPath $document) { Copy-Item -LiteralPath $document -Destination $package }
 }

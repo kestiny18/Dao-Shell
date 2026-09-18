@@ -1,11 +1,11 @@
-## 用户会看到什么变化
+## User-visible change
 
-说明解决的具体问题、变化后的行为。
+Describe the concrete problem and the resulting behavior.
 
-## 验证
+## Validation
 
-写明执行过的检查与结果；未验证的部分请直接说明。
+List the checks you ran and their results. State what remains unverified.
 
-## 相关讨论
+## Related discussion
 
-如有相关 Issue 或产品取舍，附上链接。
+Link related issues or discussions about product decisions, if any.

@@ -15,6 +15,12 @@ pub fn prepare(
     journal: &mut Journal,
 ) -> Result<Operation> {
     ensure!(cfg!(windows), "文件移动首版只支持 Windows");
+    let blockers = move_blockers(ids, destination, scope, objects, journal)?;
+    ensure!(
+        blockers.is_empty(),
+        "无法准备移动：\n- {}",
+        blockers.join("\n- ")
+    );
     ensure!(
         !ids.is_empty() && ids.len() <= 20,
         "一次只能移动 1–20 个普通文件"
@@ -95,6 +101,113 @@ pub fn prepare(
     };
     journal.save(&operation)?;
     Ok(operation)
+}
+
+/// Report independent blockers before building a plan. All reads remain inside Scope;
+/// failed identity/read checks suppress dependent checks rather than trusting stale objects.
+fn move_blockers(
+    ids: &[String],
+    destination: &Path,
+    scope: &Scope,
+    objects: &Objects,
+    journal: &Journal,
+) -> Result<Vec<String>> {
+    let mut blockers = Vec::new();
+    if ids.is_empty() || ids.len() > 20 {
+        blockers.push("一次只能移动 1–20 个普通文件".into());
+    }
+    if let Err(error) = scope.destination(destination) {
+        blockers.push(format!("目标目录：{error:#}"));
+    }
+    let target = scope
+        .inspect_destination(destination)
+        .and_then(|(path, missing)| {
+            let parent = missing.first().and_then(|p| p.parent()).unwrap_or(&path);
+            let identity = platform::identity(parent)?;
+            Ok((path, identity))
+        });
+    let target = match target {
+        Ok(target) => Some(target),
+        Err(error) => {
+            blockers.push(format!(
+                "目标位置无法核实，其跨卷和名称冲突检查未完成：{error:#}"
+            ));
+            None
+        }
+    };
+    let unresolved = journal.list()?;
+    let mut seen = HashSet::new();
+    let mut names = HashSet::new();
+    // Bound work even for malformed oversized requests.
+    for (index, id) in ids.iter().take(20).enumerate() {
+        let label = format!("第 {} 项", index + 1);
+        let object = match objects.checked(id, scope, false) {
+            Ok(object) => object,
+            Err(error) => {
+                blockers.push(format!("{label}：{error:#}"));
+                continue;
+            }
+        };
+        if let Err(error) = scope.check(&object.path, true) {
+            blockers.push(format!("{label}源文件：{error:#}"));
+        }
+        if object.identity.directory {
+            blockers.push(format!("{label}：不支持移动目录"));
+        }
+        if !seen.insert((object.identity.volume, object.identity.index)) {
+            blockers.push(format!("{label}：批次不能包含重复文件或同一文件的硬链接"));
+        }
+        let Some(filename) = object.path.file_name() else {
+            blockers.push(format!("{label}：无效的文件名"));
+            continue;
+        };
+        if !names.insert(filename.to_string_lossy().to_lowercase()) {
+            blockers.push(format!("{label}：多个源文件会占用同一个目标名称"));
+        }
+        let target_path = target.as_ref().map(|(directory, identity)| {
+            if identity.volume != object.identity.volume {
+                blockers.push(format!(
+                    "{label}：首版不支持跨卷移动，增加写权限也不能解除此限制"
+                ));
+            }
+            let path = directory.join(filename);
+            if object.path == path {
+                blockers.push(format!("{label}：文件已经位于目标目录"));
+            }
+            match path.try_exists() {
+                Ok(true) => blockers.push(format!(
+                    "{label}：目的文件已存在，不会覆盖：{}",
+                    path.display()
+                )),
+                Err(error) => blockers.push(format!("{label}：目的文件无法核实：{error}")),
+                Ok(false) => {}
+            }
+            path
+        });
+        if unresolved
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op.status,
+                    Status::Unknown
+                        | Status::Executing
+                        | Status::Verifying
+                        | Status::AwaitingConfirmation
+                )
+            })
+            .any(|op| {
+                op.items.iter().any(|item| {
+                    item.identity.same_object(&object.identity)
+                        || target_path.as_ref() == Some(&item.destination)
+                })
+            })
+        {
+            blockers.push(format!(
+                "{label}：相同对象有未核对操作；请先使用 history --reconcile 核对，不能自动重试"
+            ));
+        }
+    }
+    Ok(blockers)
 }
 
 /// Confirmation is a local UI callback. It is never deserialized from model arguments.

@@ -54,6 +54,13 @@ impl Scope {
         Ok(path)
     }
     pub fn destination(&self, path: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
+        self.resolve_destination(path, true)
+    }
+    /// Read-only preparation diagnostics do not grant permission to create the path.
+    pub(crate) fn inspect_destination(&self, path: &Path) -> Result<(PathBuf, Vec<PathBuf>)> {
+        self.resolve_destination(path, false)
+    }
+    fn resolve_destination(&self, path: &Path, write: bool) -> Result<(PathBuf, Vec<PathBuf>)> {
         ensure!(path.is_absolute(), "目的目录必须是绝对路径");
         validate_components(path)?;
         let mut ancestor = path.to_owned();
@@ -67,7 +74,7 @@ impl Scope {
             );
             ensure!(ancestor.pop(), "找不到已有的目标父目录");
         }
-        let mut target = self.check(&ancestor, true)?;
+        let mut target = self.check(&ancestor, write)?;
         ensure!(target.is_dir(), "目的地的父路径不是目录");
         let mut create = Vec::new();
         for component in missing.into_iter().rev() {

@@ -169,6 +169,90 @@ fn unknown_and_directory_effects_are_not_hidden_by_batch_status() {
 #[cfg(windows)]
 mod windows {
     use super::*;
+    #[test]
+    fn cross_volume_and_read_only_blockers_are_reported_together_when_two_volumes_exist() {
+        let source = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        if platform::identity(source.path()).unwrap().volume
+            == platform::identity(target.path()).unwrap().volume
+        {
+            eprintln!(
+                "Cross-volume fixture unavailable: TEMP and workspace are on the same volume"
+            );
+            return;
+        }
+        let path = source.path().join("合同.txt");
+        fs::write(&path, "unchanged").unwrap();
+        let scope = Scope::new(&[source.path().into()], &[target.path().into()]).unwrap();
+        let mut objects = Objects::default();
+        let id = objects.insert(&path).unwrap().id;
+        let mut journal = Journal::open(&source.path().join("journal")).unwrap();
+        let error = operations::prepare(&[id], target.path(), &scope, &objects, &mut journal)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("源文件") && error.contains("写入"),
+            "{error}"
+        );
+        assert!(error.contains("跨卷移动"), "{error}");
+        assert!(journal.list().unwrap().is_empty());
+        assert!(!target.path().join("合同.txt").exists());
+        assert_eq!(fs::read_to_string(path).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn prepare_reports_independent_blockers_without_creating_a_plan() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        fs::write(source.join("合同.txt"), "source").unwrap();
+        fs::write(target.join("合同.txt"), "keep").unwrap();
+        let scope = Scope::new(&[source.clone(), target.clone()], &[]).unwrap();
+        let mut objects = Objects::default();
+        let id = objects.insert(&source.join("合同.txt")).unwrap().id;
+        let mut journal = Journal::open(&temp.path().join("journal")).unwrap();
+        let error = operations::prepare(&[id], &target, &scope, &objects, &mut journal)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("目标目录") && error.contains("写入"),
+            "{error}"
+        );
+        assert!(
+            error.contains("源文件") && error.contains("写入"),
+            "{error}"
+        );
+        assert!(error.contains("目的文件已存在"), "{error}");
+        assert!(journal.list().unwrap().is_empty());
+        assert_eq!(fs::read_to_string(target.join("合同.txt")).unwrap(), "keep");
+        assert_eq!(
+            fs::read_to_string(source.join("合同.txt")).unwrap(),
+            "source"
+        );
+    }
+
+    #[test]
+    fn blocker_diagnostics_do_not_probe_an_unreadable_destination() {
+        let mut fixture = setup();
+        let outside = fixture._temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("合同.txt"), "private").unwrap();
+        let error = operations::prepare(
+            &[fixture.id.clone()],
+            &outside,
+            &fixture.scope,
+            &fixture.objects,
+            &mut fixture.journal,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("检查未完成"), "{error}");
+        assert!(!error.contains("目的文件已存在"), "{error}");
+        assert!(fixture.journal.list().unwrap().is_empty());
+    }
+
     struct Fixture {
         _temp: tempfile::TempDir,
         root: std::path::PathBuf,

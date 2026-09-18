@@ -513,6 +513,9 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 };
+                // Windows can inherit the listener's nonblocking mode on accepted sockets.
+                // The fixture reads complete HTTP messages with a bounded blocking timeout.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();

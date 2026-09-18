@@ -1,6 +1,8 @@
 //! Read-only discovery experiment. Not registered as an LLM tool or production backend.
 #[path = "inventory/index.rs"]
 mod index;
+#[path = "inventory/watch.rs"]
+mod watch;
 #[cfg(windows)]
 #[path = "inventory/windows.rs"]
 mod windows;
@@ -19,6 +21,19 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// 实验：监听明确目录，文件变化增量更新，目录变化/遗漏/重启时重扫。
+    Watch {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long, default_value_t = 30)]
+        seconds: u64,
+        #[arg(long, default_value_t = 30)]
+        reconcile_seconds: u64,
+        #[arg(long, default_value_t = 100_000)]
+        max_entries: usize,
+    },
     /// 扫描一个明确目录并原子替换快照；数据库必须位于该目录之外。
     Scan {
         #[arg(long)]
@@ -56,6 +71,20 @@ fn main() -> Result<()> {
     let signal = cancel.clone();
     ctrlc::set_handler(move || signal.cancel())?;
     let result = match Args::parse().command {
+        Command::Watch {
+            root,
+            db,
+            seconds,
+            reconcile_seconds,
+            max_entries,
+        } => serde_json::to_value(watch::run(
+            &root,
+            &db,
+            seconds,
+            reconcile_seconds,
+            max_entries,
+            &cancel,
+        )?)?,
         Command::Scan {
             root,
             db,

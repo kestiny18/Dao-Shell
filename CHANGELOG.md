@@ -6,6 +6,8 @@
 
 ### 2026-09-19
 
+- Extend the isolated inventory experiment with ordinary-user directory notifications: transactional file deltas, conservative directory reconciliation, bounded event queues, periodic rescans and startup recovery. No daemon, elevation or USN replay is introduced.
+
 - Report independently verifiable move blockers together before creating a plan, including missing write scope, cross-volume moves, existing targets and unresolved operations. Keep all diagnostic reads within the configured read scope.
 - Add an isolated file-inventory experiment: persistent metadata snapshots, literal multi-term queries, atomic rebuilds, coverage reporting and a read-only Windows USN capability probe. This is not the production search backend or a live index.
 - Add repeatable Windows fixture checks for restart, directory rename, deletion, junction exclusion and query timings. Record the staged inventory / desktop / shared-core exploration in the roadmap.

@@ -36,3 +36,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 [profile.release]
 lto = "thin"
 strip = true
+
+[dev-dependencies]
+# Experimental directory notifications; not part of the production Shell runtime.
+notify = "8.2"

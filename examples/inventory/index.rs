@@ -29,6 +29,8 @@ pub struct Snapshot {
     pub error_samples: Vec<String>,
     pub coverage: String,
     pub freshness: String,
+    #[serde(default)]
+    pub last_incremental_update_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,6 +149,7 @@ pub fn scan(
         error_samples: Vec::new(),
         coverage: "selected_root_excluding_links".into(),
         freshness: "manual_snapshot_not_live".into(),
+        last_incremental_update_at: None,
     };
     let mut walker = WalkDir::new(&root).follow_links(false).into_iter();
     let mut visited = 0;
@@ -237,6 +240,113 @@ fn record_error(snapshot: &mut Snapshot, error: String) {
     }
 }
 
+/// Update only ordinary files whose current state can be checked safely. A directory,
+/// missing ancestor, ambiguous path, or partial baseline requests a full reconciliation.
+/// Events are hints: never trust an event's identity, kind, or ordering as filesystem truth.
+pub fn refresh_paths(
+    db: &Path,
+    paths: &[PathBuf],
+    max_entries: usize,
+    cancel: &Cancellation,
+) -> Result<Option<Snapshot>> {
+    cancel.check()?;
+    let db = database_path(db)?;
+    let mut conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    validate_database(&conn)?;
+    conn.busy_timeout(Duration::from_secs(2))?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut snapshot = read_snapshot(&tx)?;
+    if snapshot.errors > 0 || paths.len() > 1024 {
+        return Ok(None);
+    }
+    let paths: std::collections::BTreeSet<_> = paths.iter().collect();
+    for path in paths {
+        cancel.check()?;
+        if !path.starts_with(&snapshot.root) || path == &snapshot.root {
+            return Ok(None);
+        }
+        if dao_shell::files::validate_components(path).is_err() {
+            return Ok(None);
+        }
+        let Some(parent) = path.parent() else {
+            return Ok(None);
+        };
+        // A deleted parent, link replacement or denied access must not masquerade as deletion.
+        let Ok(parent) = normalize_existing(parent) else {
+            return Ok(None);
+        };
+        if !parent.starts_with(&snapshot.root) {
+            return Ok(None);
+        }
+        let Some(path_text) = path.to_str() else {
+            return Ok(None);
+        };
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT identity_json FROM entries WHERE path=?1",
+                [path_text],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous {
+            let identity: FileIdentity = serde_json::from_str(&previous)?;
+            if identity.directory {
+                return Ok(None);
+            }
+        }
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() && !platform::is_link(&metadata) => {
+                let Ok(canonical) = normalize_existing(path) else {
+                    return Ok(None);
+                };
+                if !canonical.starts_with(&snapshot.root) {
+                    return Ok(None);
+                }
+                let Ok(identity) = platform::identity(&canonical) else {
+                    return Ok(None);
+                };
+                if identity.directory {
+                    return Ok(None);
+                }
+                let Some(canonical_text) = canonical.to_str() else {
+                    return Ok(None);
+                };
+                let Some(relative) = canonical.strip_prefix(&snapshot.root)?.to_str() else {
+                    return Ok(None);
+                };
+                tx.execute("DELETE FROM entries WHERE path=?1", [path_text])?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO entries VALUES (?1, ?2, ?3)",
+                    params![
+                        canonical_text,
+                        relative.to_lowercase(),
+                        serde_json::to_string(&identity)?
+                    ],
+                )?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tx.execute("DELETE FROM entries WHERE path=?1", [path_text])?;
+            }
+            _ => return Ok(None),
+        }
+    }
+    let count: i64 = tx.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))?;
+    snapshot.entries = usize::try_from(count)?;
+    ensure!(
+        snapshot.entries <= max_entries,
+        "增量更新超过条目预算；原快照保留"
+    );
+    cancel.check()?;
+    snapshot.last_incremental_update_at = Some(now());
+    snapshot.freshness = "event_assisted_snapshot_not_live".into();
+    tx.execute(
+        "UPDATE snapshot SET json=?1 WHERE id=1",
+        [serde_json::to_string(&snapshot)?],
+    )?;
+    tx.commit()?;
+    Ok(Some(snapshot))
+}
+
 pub fn query(db: &Path, terms: &[String], limit: usize) -> Result<QueryResult> {
     ensure!((1..=200).contains(&limit), "limit 必须为 1..200");
     ensure!(
@@ -297,6 +407,55 @@ mod tests {
             &Cancellation::default(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn incremental_batches_recheck_identity_and_roll_back_before_directory_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("files");
+        let db = temp.path().join("index.db");
+        fs::create_dir(&root).unwrap();
+        let file = root.join("first.txt");
+        fs::write(&file, "first").unwrap();
+        run(&root, &db);
+        let root = normalize_existing(&root).unwrap();
+        let file = root.join("first.txt");
+        fs::write(&file, "changed length").unwrap();
+        let cancel = Cancellation::default();
+        assert!(
+            refresh_paths(&db, std::slice::from_ref(&file), 100, &cancel)
+                .unwrap()
+                .is_some()
+        );
+        let hit = query(&db, &["first".into()], 10).unwrap().hits.remove(0);
+        assert_eq!(hit.identity_at_scan.size, 14);
+        fs::remove_file(&file).unwrap();
+        refresh_paths(&db, std::slice::from_ref(&file), 100, &cancel)
+            .unwrap()
+            .unwrap();
+        assert!(query(&db, &["first".into()], 10).unwrap().hits.is_empty());
+        let added = root.join("aaa.txt");
+        fs::write(&added, "new").unwrap();
+        let directory = root.join("zzz");
+        fs::create_dir(&directory).unwrap();
+        assert!(
+            refresh_paths(&db, &[added.clone(), directory], 100, &cancel)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            query(&db, &["aaa".into()], 10).unwrap().hits.is_empty(),
+            "partial delta must roll back before fallback"
+        );
+        assert!(
+            refresh_paths(&db, &[temp.path().join("outside")], 100, &cancel)
+                .unwrap()
+                .is_none()
+        );
+        assert!(refresh_paths(&db, &[added], 0, &cancel).is_err());
+        assert!(query(&db, &["aaa".into()], 10).unwrap().hits.is_empty());
+        run(&root, &db);
+        assert_eq!(query(&db, &["aaa".into()], 10).unwrap().hits.len(), 1);
     }
 
     #[test]

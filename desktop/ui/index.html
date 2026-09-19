@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dao-Shell</title><link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="mark">dao<span>›</span></span><span class="brand-name">Dao-Shell<small>电脑，从一句话开始。</small></span></div>
+      <button class="new-session" id="reset">＋ 新会话</button>
+      <div class="side-label">这次可以做什么</div>
+      <div class="active-nav"><span>⌕</span> 找到并打开文件</div>
+      <div class="scope-block"><div class="side-label">查找范围</div><ul id="roots"><li>正在读取配置…</li></ul><p class="scope-note">只在你已选择的目录中查找。</p></div>
+      <div class="connection"><span class="dot" id="model-dot"></span><div id="model-label">正在连接本地会话</div></div>
+      <div class="preview">桌面预览 · 0.1<br>每次打开，由你确认。</div>
+    </aside>
+    <main>
+      <header><span>文件入口 <span class="tag">PREVIEW</span></span><span class="local-label">◇ 本地文件，明确范围</span></header>
+      <div class="content-scroll">
+      <div id="config-notice" class="notice" hidden></div>
+      <section id="conversation" aria-live="polite" aria-label="对话">
+        <div class="welcome" id="welcome"><div class="eyebrow">少想一步，轻松一点</div><h1>想找什么？</h1><p>描述文件的名字、所在项目，或你记得的线索。</p><div class="suggestions"><button data-prompt="帮我找一下 PDF 文档">找一下 PDF 文档 <span>↗</span></button><button data-prompt="找一下客户端初始化的 SQL 脚本">找到初始化脚本 <span>↗</span></button></div><p class="welcome-note">先找到真实候选，再决定下一步。</p></div>
+      </section>
+      <section class="candidates" id="candidate-panel" hidden aria-label="文件候选"><div class="section-title">找到的文件 <span id="candidate-count"></span></div><div id="candidate-list"></div></section>
+      <section class="confirmation" id="confirmation" hidden role="region" aria-label="确认打开"><div class="eyebrow">需要你确认</div><h2>打开这个文件？</h2><strong id="confirm-name"></strong><p id="confirm-path"></p><small>交给系统默认应用打开。此请求将在 90 秒后失效。</small><div class="confirm-actions"><button id="reject">暂不打开</button><button class="primary" id="approve">确认打开 ↗</button></div></section>
+      </div>
+      <footer><div class="activity" id="activity" role="status">准备就绪</div><form id="composer"><label class="sr-only" for="input">你想找什么文件</label><textarea id="input" rows="2" maxlength="16000" placeholder="比如：找一下项目里的合同 PDF"></textarea><div class="composer-bottom"><label class="mode"><select id="mode" aria-label="输入方式"><option value="say">自然语言</option><option value="search">文件名搜索</option></select></label><div><button type="button" id="cancel" hidden>停止</button><button class="primary" id="send" type="submit">发送 ↑</button></div></div></form><p class="footnote">Enter 发送 · Shift + Enter 换行 · 查找只读取文件名与元数据</p></footer>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "identifier": "main-file-entry",
+  "description": "Only the bundled main window may use the narrow file session adapter.",
+  "windows": ["main"],
+  "permissions": ["allow-session-info", "allow-perform", "allow-confirm-open", "allow-cancel"]
+}

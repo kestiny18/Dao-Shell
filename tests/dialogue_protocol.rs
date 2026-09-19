@@ -95,6 +95,53 @@ fn setup() -> (tempfile::TempDir, Runtime) {
     (temp, runtime)
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn file_entry_rejects_model_tools_outside_its_profile() {
+    let (_temp, mut runtime) = setup();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let body = request(&mut stream);
+        let names: Vec<_> = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["file_search", "file_inspect", "file_open"]);
+        respond(
+            &mut stream,
+            call(
+                "bad",
+                "file_move_batch",
+                json!({"object_ids":[],"destination":"C:\\"}),
+            ),
+        );
+        let (mut stream, _) = listener.accept().unwrap();
+        let body = request(&mut stream);
+        assert!(
+            body["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("当前入口不提供此能力")
+        );
+        respond(
+            &mut stream,
+            json!({"role":"assistant","content":"当前只支持查找和打开。"}),
+        );
+    });
+    let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    let mut ui = Ui::default();
+    dialogue
+        .turn("帮我移动文件", &mut runtime, &mut ui)
+        .await
+        .unwrap();
+    assert!(runtime.journal.list().unwrap().is_empty());
+    assert_eq!(ui.confirmations, 0);
+    server.join().unwrap();
+}
+
 #[cfg(windows)]
 #[tokio::test(flavor = "multi_thread")]
 async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() {

@@ -6,6 +6,10 @@
 
 ### 2026-09-19
 
+- Add a minimal Windows Tauri desktop preview for natural-language file search, candidate selection, confirmed opening and cancellation. Reuse CLI configuration and file rules through an isolated in-process file session; retain explicit local filename search.
+- Restrict desktop model tools to search, metadata and opening, bind confirmations to expiring one-time requests, and distinguish local opening receipts from model text. Keep the composer visible while history scrolls.
+- Add session isolation and confirmation regression tests, a synthetic desktop model fixture and a separate Windows desktop CI job. The inventory experiment remains separate from production search.
+
 - Extend the isolated inventory experiment with ordinary-user directory notifications: transactional file deltas, conservative directory reconciliation, bounded event queues, periodic rescans and startup recovery. No daemon, elevation or USN replay is introduced.
 
 - Report independently verifiable move blockers together before creating a plan, including missing write scope, cross-volume moves, existing targets and unresolved operations. Keep all diagnostic reads within the configured read scope.

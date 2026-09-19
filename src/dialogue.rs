@@ -11,6 +11,7 @@ const CONTEXT_BYTES: usize = 128 * 1024;
 pub struct Dialogue {
     client: ModelClient,
     messages: Vec<Value>,
+    tools: Vec<Value>,
 }
 impl Dialogue {
     pub fn new(config: &ModelConfig, runtime: &Runtime) -> Result<Self> {
@@ -35,7 +36,24 @@ impl Dialogue {
         Ok(Self {
             client,
             messages: vec![json!({"role":"system","content":system})],
+            tools: definitions(),
         })
+    }
+    /// The desktop file entry is intentionally narrower than the CLI.
+    /// Enforced again before dispatch, even if a model invents an unavailable tool.
+    pub fn new_file_entry(config: &ModelConfig, runtime: &Runtime) -> Result<Self> {
+        let mut dialogue = Self::new(config, runtime)?;
+        dialogue.tools.retain(|tool| {
+            matches!(
+                tool["function"]["name"].as_str(),
+                Some("file_search" | "file_inspect" | "file_open")
+            )
+        });
+        // Preserve the profile instruction across reset and context trimming.
+        let extra = "当前是桌面文件入口，仅能查找、查看元数据、请求打开文件。没有移动、资源观测等其他工具。打开时等待用户在本地确认卡中选择；未确认不能称已打开。不要建议终端快捷命令。";
+        let system = dialogue.messages[0]["content"].as_str().unwrap().to_owned();
+        dialogue.messages[0]["content"] = json!(format!("{system}\n{extra}"));
+        Ok(dialogue)
     }
     pub fn reset(&mut self) {
         self.messages.truncate(1);
@@ -78,7 +96,11 @@ impl Dialogue {
             ui.progress("正在理解请求……");
             let (response, _) = self
                 .client
-                .request(&self.messages, Value::Array(definitions()), &runtime.cancel)
+                .request(
+                    &self.messages,
+                    Value::Array(self.tools.clone()),
+                    &runtime.cancel,
+                )
                 .await?;
             self.messages.push(response.replay());
             if response.tool_calls.is_empty() {
@@ -87,7 +109,14 @@ impl Dialogue {
                     .unwrap_or_else(|| "模型没有返回文字；可以继续提问或使用 /search。".into()));
             }
             for call in response.tool_calls {
-                let result = if used >= TOOL_LIMIT {
+                let result = if !self
+                    .tools
+                    .iter()
+                    .any(|tool| tool["function"]["name"] == call.function.name)
+                {
+                    used += 1;
+                    json!({"error":"不支持的能力：当前入口不提供此能力，未执行"})
+                } else if used >= TOOL_LIMIT {
                     json!({"error":"本轮已达到 12 次调用上限，未执行"})
                 } else {
                     used += 1;

@@ -1,4 +1,6 @@
 /target/
+/desktop/src-tauri/target/
+/desktop/src-tauri/gen/
 /.tools/
 /dist/
 .env

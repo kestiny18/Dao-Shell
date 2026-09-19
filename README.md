@@ -10,7 +10,7 @@ Say what you want to do. Find a file, follow up on the results, review a propose
 
 ![Dao-Shell interaction concept: find files, review a move plan, and confirm locally.](docs/assets/dao-shell-preview.en.svg)
 
-_Interaction concept, not a running screenshot. The current product is a Windows CLI development preview, with a Chinese interface. There is no desktop window yet._
+_Interaction concept, not a running screenshot. The CLI and experimental desktop preview currently use a Chinese interface._
 
 ## Everyday tasks, in your own words
 
@@ -33,7 +33,7 @@ Dao-Shell focuses on helping you use your computer. Coding-agent workflows, long
 
 ## Where things stand
 
-This is a **Windows CLI development preview**, not a stable end-user release.
+This is a **Windows development preview**, with a CLI and an experimental desktop entry, not a stable end-user release.
 
 - [x] File search, details, and requests to open files.
 - [x] Guarded moves for small groups of files.
@@ -47,7 +47,7 @@ The [implementation record](docs/IMPLEMENTATION.md) (Chinese) separates implemen
 
 ## Building in public
 
-We share small steps, decisions, failed attempts, and unfinished work. The next focus is file organization and the first-use experience on Windows. The roadmap follows what happens when people actually try the project.
+We share small steps, decisions, failed attempts, and unfinished work. A small desktop preview now lets you describe a file, choose a real candidate and confirm opening it. The next step is trying that flow with everyday files and real models. The roadmap follows what happens when people actually try the project.
 
 The most useful feedback is a concrete situation: **What did you want to do, how do you do it today, and which step was frustrating?** Issues in English or Chinese are welcome.
 
@@ -58,6 +58,8 @@ The most useful feedback is a concrete situation: **What did you want to do, how
 The preview is for early users willing to share feedback. Start with Windows, a model service that supports tool calling, and a few disposable files. Direct search also works without a model.
 
 Follow the [getting-started guide](docs/GETTING_STARTED.md) for setup and a first trial. The [documentation index](docs/README.en.md) lists further reading; implementation notes and development logs currently remain in Chinese.
+
+Want to try the window? See the [desktop preview](desktop/README.md). It currently runs from source and reuses your CLI configuration; it is not an installer release.
 
 **Project:** Dao-Shell · **Command:** `daosh` · **Prompt:** `dao >` · **Cargo package:** `dao-shell`
 

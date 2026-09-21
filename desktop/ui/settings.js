@@ -4,10 +4,15 @@ let selectedConnection = null;
 let pendingKeys = new Map();
 let settingsLoaded = false;
 
-function settingsNotice(text, error = false) {
-  $('settings-status').textContent = text;
-  $('settings-status').hidden = !text;
-  $('settings-status').classList.toggle('error', error);
+function settingsNotice(text, error = false, placement = 'top') {
+  const notice = $('settings-status');
+  const anchor = placement === 'test' ? $('test-model').parentElement
+    : placement === 'save' ? document.querySelector('.settings-save')
+    : document.querySelector('.settings-tabs');
+  if (placement === 'save') anchor.before(notice); else anchor.after(notice);
+  notice.textContent = text;
+  notice.hidden = !text;
+  notice.classList.toggle('error', error);
 }
 function applyAppearance(value) { document.documentElement.dataset.theme = value; }
 function selectOption(select, value, label) {
@@ -107,12 +112,12 @@ $('test-model').addEventListener('click', async () => {
   if (!api || busy || !settingsView) return;
   storeConnection(); const connection = currentConnection();
   const model = settingsView.config.models.choices.find((m) => m.connection_id === connection?.id);
-  if (!model) { settingsNotice('请先填写模型名称。', true); return; }
-  setBusy(true); settingsNotice('正在验证连接与工具调用…');
+  if (!model) { settingsNotice('请先填写模型名称。', true, 'test'); return; }
+  setBusy(true); settingsNotice('正在验证连接与工具调用…', false, 'test');
   try {
     const report = await api.invoke('test_connection', { request:{ model:{ endpoint:connection.endpoint, api_key_env:connection.api_key_env, model:model.name }, key:pendingKeys.get(connection.id)?.key || null } });
-    settingsNotice(`连接与工具调用通过，${report.elapsed_ms} ms。尚未保存；修改任何连接信息后需要重新测试。`);
-  } catch (error) { settingsNotice(String(error), true); }
+    settingsNotice(`连接与工具调用通过，${report.elapsed_ms} ms。尚未保存；修改任何连接信息后需要重新测试。`, false, 'test');
+  } catch (error) { settingsNotice(String(error), true, 'test'); }
   finally { setBusy(false); }
 });
 $('settings-form').addEventListener('submit', async (event) => {
@@ -128,8 +133,8 @@ $('settings-form').addEventListener('submit', async (event) => {
     pendingKeys.clear(); $('connection-key').value = '';
     applyAppearance(settingsView.config.appearance); renderConnections();
     document.querySelectorAll('.message').forEach((node) => node.remove()); $('welcome').hidden = false; candidates([]); closeConfirmation();
-    await init(); settingsNotice('设置已保存。新配置已生效，已开始新会话。');
-  } catch (error) { settingsNotice(String(error), true); }
+    await init(); settingsNotice('设置已保存。新配置已生效，已开始新会话。', false, 'save');
+  } catch (error) { settingsNotice(String(error), true, 'save'); }
   finally { setBusy(false); }
 });
 $('reload-settings').addEventListener('click', loadSettings);

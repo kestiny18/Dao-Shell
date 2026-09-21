@@ -88,8 +88,12 @@ responses. Try “找一下合同并打开第一份”, “找一下不存在的
 The last request delays its response to allow testing Stop. Ctrl+C stops the fixture.
 This validates the UI and protocol plumbing, not real-model reasoning quality.
 
-The 2026-09-21 implementation passed Rust, bridge and DOM behavior checks. Native
-visual revalidation of the new pages is pending because the Windows desktop was
-locked during the attempted check; do not treat DOM tests as native UI acceptance.
+The 2026-09-21 implementation passed 70 Rust, bridge and DOM checks (one CPU-load
+test remains intentionally ignored). Native Windows verification completed on
+2026-09-22 with the isolated fixture: overview and explicit explanation, settings
+connection test/save/restart, navigation, file results, rejected opening, empty
+results and cancellation. Test/save feedback stays beside the corresponding
+action; expanding the app list keeps scrolling inside the content area.
+Cloud-model quality and clean-machine distribution remain separate follow-ups.
 
 See the [experiment record](../docs/experiments/desktop-entry.md) for boundaries and evidence.

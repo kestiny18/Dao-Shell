@@ -5,8 +5,7 @@ use crate::{
     config::Config,
     core::{Cancellation, FileObject},
     dialogue::Dialogue,
-    files::{Objects, Scope},
-    storage::Journal,
+    files::Objects,
 };
 use anyhow::{Result, ensure};
 use serde::Serialize;
@@ -14,6 +13,7 @@ use serde_json::json;
 
 #[derive(Serialize)]
 pub struct SessionInfo {
+    pub access_mode: crate::config::AccessMode,
     pub model: Option<String>,
     pub model_error: Option<String>,
     pub roots: Vec<std::path::PathBuf>,
@@ -31,31 +31,22 @@ pub enum Action {
     Search(String),
     Open(String),
     Reset,
+    ExplainComputer(serde_json::Value),
 }
 
 pub struct FileSession {
     runtime: Runtime,
     dialogue: Option<Dialogue>,
     info: SessionInfo,
-    // Runtime currently requires a Journal. This file-only profile cannot create operations;
-    // keep its empty journal temporary instead of locking the CLI's durable operation history.
-    _temporary: tempfile::TempDir,
 }
 
 impl FileSession {
     pub fn new(config: &Config, cancel: Cancellation) -> Result<Self> {
-        let roots: Vec<_> = config
-            .read_roots
-            .iter()
-            .chain(&config.write_roots)
-            .cloned()
-            .collect();
-        let scope = Scope::new(&roots, &[])?;
-        let temporary = tempfile::tempdir()?;
+        let scope = config.scope(false)?;
         let runtime = Runtime {
             scope,
             objects: Objects::default(),
-            journal: Journal::open(temporary.path())?,
+            journal: None,
             cancel,
             last_results: Vec::new(),
             side_effects_blocked: false,
@@ -69,10 +60,11 @@ impl FileSession {
             Some(Err(error)) => (None, Some(format!("{error:#}"))),
             None => (
                 None,
-                Some("尚未连接模型，请先运行 daosh setup；也可以使用文件名搜索".into()),
+                Some("尚未配置模型，请在设置 → 模型与连接中添加；也可以使用文件名搜索".into()),
             ),
         };
         let info = SessionInfo {
+            access_mode: config.access_mode,
             model: config.model.as_ref().map(|m| m.model.clone()),
             model_error,
             roots: runtime.scope.read_roots().to_vec(),
@@ -81,7 +73,6 @@ impl FileSession {
             runtime,
             dialogue,
             info,
-            _temporary: temporary,
         })
     }
 
@@ -119,6 +110,14 @@ impl FileSession {
 
     async fn perform(&mut self, action: Action, ui: &mut dyn Interaction) -> Result<String> {
         match action {
+            Action::ExplainComputer(snapshot) => {
+                let dialogue = self
+                    .dialogue
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("请先在设置中连接模型"))?;
+                dialogue.observe_local("resource_snapshot", &snapshot);
+                dialogue.turn("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", &mut self.runtime, ui).await
+            }
             Action::Say(input) => {
                 ensure!(!input.trim().is_empty(), "请输入你想找的文件");
                 let dialogue = self.dialogue.as_mut().ok_or_else(|| {

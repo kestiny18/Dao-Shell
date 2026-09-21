@@ -12,3 +12,7 @@ mod presentation;
 pub mod resources;
 pub mod session;
 pub mod storage;
+
+pub mod computer;
+pub mod runtime;
+pub mod settings;

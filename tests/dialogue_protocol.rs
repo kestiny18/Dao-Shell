@@ -87,7 +87,7 @@ fn setup() -> (tempfile::TempDir, Runtime) {
     let runtime = Runtime {
         scope: Scope::new(std::slice::from_ref(&files), std::slice::from_ref(&files)).unwrap(),
         objects: Objects::default(),
-        journal: Journal::open(&temp.path().join("state")).unwrap(),
+        journal: Some(Journal::open(&temp.path().join("state")).unwrap()),
         cancel: Cancellation::default(),
         last_results: Vec::new(),
         side_effects_blocked: false,
@@ -137,7 +137,7 @@ async fn file_entry_rejects_model_tools_outside_its_profile() {
         .turn("帮我移动文件", &mut runtime, &mut ui)
         .await
         .unwrap();
-    assert!(runtime.journal.list().unwrap().is_empty());
+    assert!(runtime.journal.as_ref().unwrap().list().unwrap().is_empty());
     assert_eq!(ui.confirmations, 0);
     server.join().unwrap();
 }
@@ -263,7 +263,7 @@ async fn model_cannot_inject_approval_or_execute_unregistered_commands() {
     dialogue.turn("test", &mut runtime, &mut ui).await.unwrap();
     server.join().unwrap();
     assert_eq!(ui.confirmations, 0);
-    assert!(runtime.journal.list().unwrap().is_empty());
+    assert!(runtime.journal.as_ref().unwrap().list().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

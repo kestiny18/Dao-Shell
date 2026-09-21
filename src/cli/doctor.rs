@@ -23,6 +23,9 @@ pub(super) async fn run(
         display_path(data_path)
     );
     let mut problems = 0;
+    if config.access_mode == crate::config::AccessMode::Full {
+        println!("[完全访问] 受当前系统权限约束；配置目录是搜索起点，移动仍需确认和记录。");
+    }
     for (kind, roots) in [("读取", &config.read_roots), ("可写", &config.write_roots)] {
         for root in roots {
             match Scope::new(std::slice::from_ref(root), &[]) {
@@ -37,10 +40,14 @@ pub(super) async fn run(
             }
         }
     }
-    if config.read_roots.is_empty() && config.write_roots.is_empty() {
+    if config.access_mode == crate::config::AccessMode::Restricted
+        && config.read_roots.is_empty()
+        && config.write_roots.is_empty()
+    {
         println!("[待设置] 尚未授权目录，文件搜索没有范围；运行 setup 设置，资源观测仍可用。");
     }
-    if config.write_roots.is_empty() {
+    if config.access_mode == crate::config::AccessMode::Restricted && config.write_roots.is_empty()
+    {
         println!("[只读] 未授权可写目录，不能移动文件。");
     }
     match &config.model {

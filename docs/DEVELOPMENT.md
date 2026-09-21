@@ -55,9 +55,13 @@ Windows 进程 CPU 的真实负载复现单独运行（会短暂占用一个测�
 
 ```text
 src/
-  cli/              # 入口流程、参数定义、终端渲染与本地确认
+  cli.rs / cli/     # 入口流程、参数定义、终端渲染与本地确认
   dialogue.rs       # 上下文与有限工具调用循环
-  model.rs          # 模型传输、错误分类、固定样例的连接诊断
+  model.rs / model/ # Provider 配置、模型传输、固定样例的连接诊断
+  settings.rs       # 入口无关的配置保存、版本检查与凭据更新
+  runtime.rs        # 执行、权限、持久写操作要求
+  runtime/control.rs # 请求互斥、取消、一次性确认
+  computer.rs       # 本地电脑概览，带覆盖限制和采样时间
   capabilities.rs   # 六项能力的描述和参数分发
   files.rs          # 范围、查询、对象引用
   operations.rs     # 准备、确认、执行、核验、取消

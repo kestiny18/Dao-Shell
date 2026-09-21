@@ -2,7 +2,7 @@
 
 mod bridge;
 use bridge::Bridge;
-use dao_shell::session::Action;
+use dao_shell::settings::{ConnectionTest, SettingsUpdate, SettingsView};
 use std::sync::Arc;
 use tauri::{State, ipc::Channel};
 
@@ -18,16 +18,9 @@ async fn perform(
     input: String,
     on_event: Channel<serde_json::Value>,
 ) -> Result<dao_shell::session::Reply, String> {
-    let action = match kind.as_str() {
-        "say" => Action::Say(input),
-        "search" => Action::Search(input),
-        "open" => Action::Open(input),
-        "reset" => Action::Reset,
-        _ => return Err("不支持的请求".into()),
-    };
     let bridge = state.inner().clone();
     bridge.reserve()?;
-    tauri::async_runtime::spawn_blocking(move || bridge.execute(action, on_event))
+    tauri::async_runtime::spawn_blocking(move || bridge.execute(&kind, input, on_event))
         .await
         .map_err(|_| "桌面请求意外中断，请重启入口".to_string())?
 }
@@ -46,6 +39,39 @@ fn cancel(state: State<'_, Arc<Bridge>>) {
     state.cancel();
 }
 
+#[tauri::command]
+fn get_settings(state: State<'_, Arc<Bridge>>) -> Result<SettingsView, String> {
+    state.settings()
+}
+
+#[tauri::command]
+async fn save_settings(
+    state: State<'_, Arc<Bridge>>,
+    update: SettingsUpdate,
+) -> Result<SettingsView, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.save(update))
+        .await
+        .map_err(|_| "配置请求中断".to_string())?
+}
+#[tauri::command]
+async fn test_connection(
+    state: State<'_, Arc<Bridge>>,
+    request: ConnectionTest,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.test(request))
+        .await
+        .map_err(|_| "连接检测中断".to_string())?
+}
+#[tauri::command]
+async fn computer_overview(state: State<'_, Arc<Bridge>>) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.overview())
+        .await
+        .map_err(|_| "概览读取中断".to_string())?
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Arc::new(Bridge::new()))
@@ -53,7 +79,11 @@ fn main() {
             session_info,
             perform,
             confirm_open,
-            cancel
+            cancel,
+            get_settings,
+            save_settings,
+            test_connection,
+            computer_overview
         ])
         .on_window_event(|window, event| {
             if matches!(

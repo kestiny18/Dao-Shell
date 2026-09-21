@@ -47,7 +47,7 @@ The [implementation record](docs/IMPLEMENTATION.md) (Chinese) separates implemen
 
 ## Building in public
 
-We share small steps, decisions, failed attempts, and unfinished work. A small desktop preview now lets you describe a file, choose a real candidate and confirm opening it. The next step is trying that flow with everyday files and real models. The roadmap follows what happens when people actually try the project.
+We share small steps, decisions, failed attempts, and unfinished work. The desktop preview now has a local computer overview, model settings and a choice of access scope. Describe a file, choose a real candidate and confirm opening it. The next step is trying these flows with everyday files and real models. The roadmap follows what happens when people actually try the project.
 
 The most useful feedback is a concrete situation: **What did you want to do, how do you do it today, and which step was frustrating?** Issues in English or Chinese are welcome.
 
@@ -59,7 +59,7 @@ The preview is for early users willing to share feedback. Start with Windows, a 
 
 Follow the [getting-started guide](docs/GETTING_STARTED.md) for setup and a first trial. The [documentation index](docs/README.en.md) lists further reading; implementation notes and development logs currently remain in Chinese.
 
-Want to try the window? See the [desktop preview](desktop/README.md). It currently runs from source and reuses your CLI configuration; it is not an installer release.
+Want to try the window? See the [desktop preview](desktop/README.md). Configure your model in the window or reuse your CLI settings. It currently runs from source; it is not an installer release.
 
 **Project:** Dao-Shell · **Command:** `daosh` · **Prompt:** `dao >` · **Cargo package:** `dao-shell`
 

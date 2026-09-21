@@ -597,6 +597,7 @@ mod tests {
             read_roots: vec![temp.path().join("missing-read")],
             write_roots: vec![temp.path().join("missing-write")],
             model: None,
+            ..Default::default()
         };
         let mut input = Answers(["0", "0", "4", "0", "1"].map(String::from).into());
         let result = prepare(&config, &mut input, &Cancellation::default())

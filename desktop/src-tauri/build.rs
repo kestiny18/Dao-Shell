@@ -5,6 +5,10 @@ fn main() {
             "perform",
             "confirm_open",
             "cancel",
+            "get_settings",
+            "save_settings",
+            "test_connection",
+            "computer_overview",
         ]),
     ))
     .expect("Tauri build configuration");

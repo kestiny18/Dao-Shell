@@ -101,7 +101,7 @@ pub fn render(capability: &str, value: &Value) {
                 value["elapsed_ms"]
             );
             if value["items"].as_array().is_some_and(Vec::is_empty) {
-                println!("当前候选编号已清空；请重新查找后使用 /open 或 /move。");
+                println!("当前候选已清空；请重新查找后使用 /open 或 /move。");
             }
             if value["has_more"] == true {
                 println!("还有其他结果，可继续翻页。");
@@ -114,7 +114,7 @@ pub fn render(capability: &str, value: &Value) {
             }
         }
         "file_selection" => {
-            println!("当前候选编号（上次查询快照，执行前会重新核对）：");
+            println!("当前候选（上次查询快照，执行前会重新核对）：");
             render_items(value);
             if value["items"].as_array().is_some_and(Vec::is_empty) {
                 println!("暂无候选，请先查找。");
@@ -204,12 +204,11 @@ pub fn render(capability: &str, value: &Value) {
 }
 fn render_items(value: &Value) {
     if let Some(items) = value["items"].as_array() {
-        for (i, object) in items.iter().enumerate() {
+        for object in items {
             let path = object["path"].as_str().unwrap_or("");
             let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
             println!(
-                "{}. {}  [{}]  {}\n   {}\n   修改：{}",
-                i + 1,
+                "{}  [{}]  {}\n   {}\n   修改：{}",
                 safe_text(name),
                 if object["identity"]["directory"] == true {
                     "目录"

@@ -13,12 +13,16 @@ const server = http.createServer((req, res) => {
   req.on('data', (chunk) => { body += chunk; if (body.length > 200000) req.destroy(); });
   req.on('end', () => {
     try {
-      const { messages } = JSON.parse(body);
+      const { messages, tools } = JSON.parse(body);
       const last = messages.at(-1);
       const input = messages.findLast((message) => message.role === 'user')?.content || '';
       const tool = (name, args) => ({ role: 'assistant', content: null, tool_calls: [{ id: `fixture-${Date.now()}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] });
       let response;
-      if (last.role !== 'tool') response = tool('file_search', { query: input.includes('不存在') ? 'definitely-absent' : '合同', kind: 'file' });
+      if (tools?.some((item) => item.function.name === 'dao_shell_connection_check')) {
+        response = last.role === 'tool' ? { role:'assistant', content:'DAO_SHELL_OK' } : tool('dao_shell_connection_check', {});
+      }
+      else if (input.includes('电脑概览')) response = { role:'assistant', content:'本地测试模型：已收到资源快照。这是短时观察，不能单独确定卡顿根因。' };
+      else if (last.role !== 'tool') response = tool('file_search', { query: input.includes('不存在') ? 'definitely-absent' : '合同', kind: 'file' });
       else {
         const result = JSON.parse(last.content);
         if (result.items && result.items.length && input.includes('打开')) response = tool('file_open', { object_id: result.items[0].id });

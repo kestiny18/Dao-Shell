@@ -9,25 +9,61 @@
     <aside>
       <div class="brand"><span class="mark">dao<span>›</span></span><span class="brand-name">Dao-Shell<small>电脑，从一句话开始。</small></span></div>
       <button class="new-session" id="reset">＋ 新会话</button>
-      <div class="side-label">这次可以做什么</div>
-      <div class="active-nav"><span>⌕</span> 找到并打开文件</div>
-      <div class="scope-block"><div class="side-label">查找范围</div><ul id="roots"><li>正在读取配置…</li></ul><p class="scope-note">只在你已选择的目录中查找。</p></div>
-      <div class="connection"><span class="dot" id="model-dot"></span><div id="model-label">正在连接本地会话</div></div>
-      <div class="preview">桌面预览 · 0.1<br>每次打开，由你确认。</div>
+      <nav class="main-nav" aria-label="主导航">
+        <button data-page="home" aria-current="page">⌂ <span>我的电脑</span></button>
+        <button data-page="files">⌕ <span>文件</span></button>
+        <button data-page="settings">⚙ <span>设置</span></button>
+      </nav>
+      <div class="scope-block"><div class="side-label" id="access-label">受限访问</div><ul id="roots"><li>正在读取配置…</li></ul><p class="scope-note" id="scope-note">只在你已选择的目录中查找。</p></div>
+      <div class="connection"><span class="dot" id="model-dot"></span><div id="model-label">正在读取模型配置</div></div>
+      <div class="preview">开发预览 · 0.1<br>操作前，始终由你决定。</div>
     </aside>
     <main>
-      <header><span>文件入口 <span class="tag">PREVIEW</span></span><span class="local-label">◇ 本地文件，明确范围</span></header>
+      <header><span id="page-title">我的电脑</span><span class="local-label">◇ 本地观察，明确范围</span></header>
       <div class="content-scroll">
-      <div id="config-notice" class="notice" hidden></div>
-      <section id="conversation" aria-live="polite" aria-label="对话">
-        <div class="welcome" id="welcome"><div class="eyebrow">少想一步，轻松一点</div><h1>想找什么？</h1><p>描述文件的名字、所在项目，或你记得的线索。</p><div class="suggestions"><button data-prompt="帮我找一下 PDF 文档">找一下 PDF 文档 <span>↗</span></button><button data-prompt="找一下客户端初始化的 SQL 脚本">找到初始化脚本 <span>↗</span></button></div><p class="welcome-note">先找到真实候选，再决定下一步。</p></div>
-      </section>
-      <section class="candidates" id="candidate-panel" hidden aria-label="文件候选"><div class="section-title">找到的文件 <span id="candidate-count"></span></div><div id="candidate-list"></div></section>
-      <section class="confirmation" id="confirmation" hidden role="region" aria-label="确认打开"><div class="eyebrow">需要你确认</div><h2>打开这个文件？</h2><strong id="confirm-name"></strong><p id="confirm-path"></p><small>交给系统默认应用打开。此请求将在 90 秒后失效。</small><div class="confirm-actions"><button id="reject">暂不打开</button><button class="primary" id="approve">确认打开 ↗</button></div></section>
+        <div id="config-notice" class="notice" hidden></div>
+        <section id="page-home" class="page">
+          <div class="page-heading"><div><div class="eyebrow">此刻，了解你的电脑</div><h1>一眼看见，心中有数。</h1><p id="device-summary">正在读取本机状态…</p></div><button id="refresh-home">刷新概览</button></div>
+          <div class="metrics"><article class="card"><div class="side-label">CPU 使用率</div><strong id="cpu-value">—</strong><p>整机口径 · 短时采样</p></article><article class="card"><div class="side-label">内存</div><strong id="memory-value">—</strong><p id="memory-detail">等待采样</p></article><article class="card"><div class="side-label">系统已运行</div><strong id="uptime-value">—</strong><p id="architecture">—</p></article></div>
+          <div class="section-heading"><h2>磁盘空间</h2><span id="observed-at">尚未采样</span></div><div id="disks" class="disks"></div>
+          <div class="home-actions"><button id="explain-home" disabled>让模型解释这次资源快照 ↗</button><small>仅在点击后发送本次 CPU、内存、磁盘与前 5 个进程采样；不发送应用清单。</small></div>
+          <details class="card"><summary>网络接口 <span id="network-count"></span></summary><p id="network-note"></p><div id="networks"></div></details>
+          <details class="card"><summary>已登记应用 <span id="app-count"></span></summary><p id="app-note"></p><label class="sr-only" for="app-filter">筛选应用</label><input id="app-filter" placeholder="按名称筛选应用"><div id="applications" class="application-list"></div></details>
+          <p class="scope-note">概览直接从本机读取，不自动调用模型。短时采样不能单独确定卡顿根因。</p>
+        </section>
+        <section id="page-files" class="page" hidden>
+          <section id="conversation" aria-live="polite" aria-label="对话"><div class="welcome" id="welcome"><div class="eyebrow">少想一步，轻松一点</div><h1>想找什么？</h1><p>描述文件的名字、所在项目，或你记得的线索。</p><div class="suggestions"><button data-prompt="帮我找一下 PDF 文档">找一下 PDF 文档 ↗</button><button data-prompt="找一下客户端初始化的 SQL 脚本">找到初始化脚本 ↗</button></div><p class="welcome-note">先找到真实候选，再决定下一步。</p></div></section>
+          <section class="candidates" id="candidate-panel" hidden aria-label="文件候选"><div class="section-title">找到的文件 <span id="candidate-count"></span></div><div id="candidate-list"></div></section>
+          <section class="confirmation" id="confirmation" hidden role="region" aria-label="确认打开"><div class="eyebrow">需要你确认</div><h2>打开这个文件？</h2><strong id="confirm-name"></strong><p id="confirm-path"></p><small>交给系统默认应用打开。此请求将在 90 秒后失效。</small><div class="confirm-actions"><button id="reject">暂不打开</button><button class="primary" id="approve">确认打开 ↗</button></div></section>
+        </section>
+        <section id="page-settings" class="page" hidden>
+          <div class="page-heading"><div><div class="eyebrow">按你的习惯使用</div><h1>设置</h1><p>连接模型，选择范围。你的设置由各入口共用。</p></div></div>
+          <div class="settings-tabs" role="group" aria-label="设置分类"><button data-settings="models" aria-pressed="true">模型与连接</button><button data-settings="access">访问权限</button><button data-settings="general">通用与外观</button></div>
+          <div id="settings-status" role="status" class="notice" hidden></div>
+          <form id="settings-form" class="settings-controls">
+            <section id="settings-models">
+              <div class="setting-group"><h2>服务连接</h2><p>一个连接可以保存多个模型。协议为 Chat Completions 兼容格式。</p><div class="inline-fields"><label>当前连接<select id="connection-list"></select></label><button type="button" id="add-connection">＋ 添加连接</button><button type="button" id="remove-connection">移除连接</button></div>
+                <div id="connection-fields"><label>服务预设<select id="provider-preset"><option value="custom">自定义兼容服务</option value="deepseek">DeepSeek</option><option value="local">本机兼容服务</option></select></label>
+                <label>连接名称<input id="connection-label" maxlength="120" placeholder="例如：我的 DeepSeek"></label>
+                <label>请求地址<input id="connection-endpoint" maxlength="4096" placeholder="https://…/v1/chat/completions"></label>
+                <label>模型名称 <small>每行一个，填写服务提供的模型 ID</small><textarea id="connection-models" rows="3" placeholder="例如：deepseek-flash"></textarea></label>
+                <label>API Key <small id="credential-state">尚未设置</small><input id="connection-key" type="password" autocomplete="off" placeholder="留空保留已有密钥"></label>
+                <label class="check-row"><input id="persist-key" type="checkbox" checked>保存到 Windows 凭据管理器</label>
+                <details><summary>高级：凭据引用</summary><label>环境变量名称<input id="connection-env" maxlength="128"></label><p>已有环境变量优先于系统保存的密钥。新输入的密钥在本次进程内优先使用；本机免密服务可留空。</p></details>
+                <div class="inline-fields"><button type="button" id="test-model">测试此连接的第一个模型</button><small>使用虚构样例，最多两次请求，可能产生费用；不发送本机文件。</small></div></div>
+              </div>
+              <div class="setting-group"><h2>默认模型</h2><label>用于新会话<select id="active-model"></select></label><p>保存配置与通过连接测试是两回事。保存后开始新会话，旧候选失效。</p></div>
+            </section>
+            <section id="settings-access" hidden><div class="setting-group"><h2>访问模式</h2><label>文件访问<select id="access-mode"><option value="restricted">安全模式 · 仅指定目录</option><option value="full">完全访问 · 当前系统用户可访问的位置</option></select></label><p id="access-description"></p><label>查找目录 <small>每行一个完整目录路径</small><textarea id="read-roots" rows="4" placeholder="E:\工作资料"></textarea></label><label>CLI 可写目录 <small>安全模式下有效，每行一个</small><textarea id="write-roots" rows="3"></textarea></label><p>完全访问不提升系统权限，也不跳过确认。桌面当前只提供查找、元数据与确认打开；移动仍通过 CLI 执行并记录。新模式不自动开放删除或覆盖。</p></div></section>
+            <section id="settings-general" hidden><div class="setting-group"><h2>外观</h2><label>主题<select id="appearance"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><p>界面语言：简体中文。设置页切换不会丢失当前对话。</p></div></section>
+            <div class="settings-save"><button type="button" id="reload-settings">放弃修改并重新载入</button><button class="primary" type="submit" id="save-settings">保存设置</button></div>
+          </form>
+          <button id="settings-cancel" hidden>停止当前请求</button>
+        </section>
       </div>
-      <footer><div class="activity" id="activity" role="status">准备就绪</div><form id="composer"><label class="sr-only" for="input">你想找什么文件</label><textarea id="input" rows="2" maxlength="16000" placeholder="比如：找一下项目里的合同 PDF"></textarea><div class="composer-bottom"><label class="mode"><select id="mode" aria-label="输入方式"><option value="say">自然语言</option><option value="search">文件名搜索</option></select></label><div><button type="button" id="cancel" hidden>停止</button><button class="primary" id="send" type="submit">发送 ↑</button></div></div></form><p class="footnote">Enter 发送 · Shift + Enter 换行 · 查找只读取文件名与元数据</p></footer>
+      <footer id="entry-footer"><div class="activity" id="activity" role="status">准备就绪</div><form id="composer"><label class="sr-only" for="input">你想找什么文件</label><textarea id="input" rows="2" maxlength="16000" placeholder="用一句话找到文件，比如：找一下项目里的合同 PDF"></textarea><div class="composer-bottom"><label class="mode"><select id="mode" aria-label="输入方式"><option value="say">自然语言</option><option value="search">文件名搜索</option></select></label><div><button type="button" id="cancel" hidden>停止</button><button class="primary" id="send" type="submit">发送 ↑</button></div></div></form><p class="footnote">Enter 发送 · Shift + Enter 换行 · 文件查找只读取名称与元数据</p></footer>
     </main>
   </div>
-  <script src="app.js"></script>
+  <script src="app.js"></script><script src="settings.js"></script><script src="home.js"></script>
 </body>
 </html>

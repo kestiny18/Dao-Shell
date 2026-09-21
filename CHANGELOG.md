@@ -4,6 +4,14 @@
 
 ## Unreleased — 第一版公开开发预览
 
+### 2026-09-21
+
+- Add a local computer overview with timestamped CPU, memory, disk, network-interface and Windows application-registry observations; model explanation requires an explicit action.
+- Add desktop model connections, default model selection, synthetic connection testing, credential storage options, access settings and system/light/dark appearance. Import existing CLI settings and reject stale saves.
+- Separate provider configuration, transport, diagnostics, settings and runtime control. Read-only sessions no longer create a temporary journal; writes require a durable journal. Apply external configuration changes before the next desktop request.
+- Add restricted/full path access without elevation or confirmation bypass; keep default search locations separate from authority. Hide candidate numbers in normal file rendering while retaining internal references and CLI shortcuts.
+- Add configuration, access, admission, local observation and DOM behavior tests. Native visual verification of the new pages is pending while the desktop is locked.
+
 ### 2026-09-19
 
 - Add a minimal Windows Tauri desktop preview for natural-language file search, candidate selection, confirmed opening and cancellation. Reuse CLI configuration and file rules through an isolated in-process file session; retain explicit local filename search.

@@ -12,7 +12,7 @@ use crate::{
     config::{Config, ModelConfig, data_dir},
     core::{Cancellation, safe_multiline, safe_text},
     dialogue::Dialogue,
-    files::{self, Objects, Scope, Search, Sort},
+    files::{self, Objects, Search, Sort},
     operations, resources,
     storage::Journal,
 };
@@ -68,7 +68,7 @@ pub async fn run(args: Args) -> Result<()> {
             }
             ConfigAction::ClearModel => config.model = None,
         }
-        Scope::new(&config.read_roots, &config.write_roots)?;
+        config.scope(true)?;
         config.save(&config_path)?;
         println!("配置已保存：{}", display_path(&config_path));
         return Ok(());
@@ -85,7 +85,7 @@ pub async fn run(args: Args) -> Result<()> {
     {
         config.read_roots.push(path.clone());
     }
-    let scope = Scope::new(&config.read_roots, &config.write_roots)?;
+    let scope = config.scope(true)?;
     match args.command {
         Some(Command::Search {
             query,
@@ -183,7 +183,7 @@ pub async fn run(args: Args) -> Result<()> {
     let mut runtime = Runtime {
         scope,
         objects: Objects::default(),
-        journal,
+        journal: Some(journal),
         cancel,
         last_results: Vec::new(),
         side_effects_blocked: false,
@@ -325,7 +325,14 @@ fn shortcut(
             }
         }
         "/history" => {
-            for op in runtime.journal.list()?.into_iter().take(50) {
+            for op in runtime
+                .journal
+                .as_ref()
+                .context("写操作记录不可用")?
+                .list()?
+                .into_iter()
+                .take(50)
+            {
                 ui.result("file_move_batch", &serde_json::to_value(op)?);
             }
         }

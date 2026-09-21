@@ -110,6 +110,7 @@ fn doctor_round_trip_is_synthetic_and_does_not_touch_files_or_journal() {
         read_roots: vec![private.clone()],
         write_roots: vec![private.clone()],
         model: Some(model),
+        ..Default::default()
     }
     .save(&config_path)
     .unwrap();

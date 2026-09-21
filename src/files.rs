@@ -15,6 +15,8 @@ use std::{
 pub struct Scope {
     read: Vec<PathBuf>,
     write: Vec<PathBuf>,
+    full_read: bool,
+    full_write: bool,
 }
 impl Scope {
     pub fn new(read: &[PathBuf], write: &[PathBuf]) -> Result<Self> {
@@ -34,7 +36,23 @@ impl Scope {
         Ok(Self {
             read: compact_roots(read),
             write: compact_roots(write),
+            full_read: false,
+            full_write: false,
         })
+    }
+    /// Default search locations do not define authority in full mode.
+    pub fn full(search_roots: &[PathBuf], writable: bool) -> Result<Self> {
+        let mut scope = Self::new(search_roots, &[])?;
+        scope.full_read = true;
+        scope.full_write = writable;
+        Ok(scope)
+    }
+    pub fn access_description(&self) -> &'static str {
+        if self.full_read {
+            "完全访问：可按用户要求指定本机目录，受系统权限与路径检查约束；默认只搜索列出的常用位置。写操作仍需确认。"
+        } else {
+            "受限访问：仅允许配置的目录。"
+        }
     }
     pub fn read_roots(&self) -> &[PathBuf] {
         &self.read
@@ -46,7 +64,11 @@ impl Scope {
         let path = normalize_existing(path)?;
         let roots = if write { &self.write } else { &self.read };
         ensure!(
-            roots.iter().any(|r| path.starts_with(r)),
+            (if write {
+                self.full_write
+            } else {
+                self.full_read
+            }) || roots.iter().any(|r| path.starts_with(r)),
             "路径不在已配置的{}范围：{}",
             if write { "写入" } else { "读取" },
             path.display()

@@ -3,6 +3,18 @@ const $ = (id) => document.getElementById(id);
 const api = window.__TAURI__?.core;
 let busy = false;
 let confirmationId = null;
+let currentPage = 'home';
+function showPage(page) {
+  currentPage = page;
+  for (const name of ['home', 'files', 'settings']) $(`page-${name}`).hidden = name !== page;
+  $('entry-footer').hidden = page === 'settings';
+  $('page-title').textContent = { home:'我的电脑', files:'文件与对话', settings:'设置' }[page];
+  document.querySelectorAll('[data-page]').forEach((button) => {
+    if (button.dataset.page === page) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+  });
+  document.dispatchEvent(new CustomEvent('pagechange', { detail:page }));
+}
+document.querySelectorAll('[data-page]').forEach((button) => button.addEventListener('click', () => showPage(button.dataset.page)));
 
 function pathText(path) { return String(path).replace(/^\\\\\?\\/, ''); }
 function nameOf(path) { return pathText(path).split(/[\\/]/).pop() || pathText(path); }
@@ -10,6 +22,8 @@ function setBusy(value) {
   busy = value;
   for (const id of ['send', 'input', 'mode', 'reset']) $(id).disabled = value;
   $('cancel').hidden = !value;
+  $('settings-cancel').hidden = !value;
+  document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home').forEach((node) => { node.disabled = value; });
   document.querySelectorAll('.file-row button,.suggestions button').forEach((button) => { button.disabled = value; });
 }
 function message(text, role = 'assistant', error = false) {
@@ -23,11 +37,11 @@ function message(text, role = 'assistant', error = false) {
 function candidates(items) {
   $('candidate-list').replaceChildren(); $('candidate-panel').hidden = !items.length;
   $('candidate-count').textContent = `${items.length} 项`;
-  for (const [index, item] of items.entries()) {
+  for (const item of items) {
     const row = document.createElement('div'); row.className = 'file-row';
     const icon = document.createElement('div'); icon.className = 'file-icon'; icon.textContent = item.identity.directory ? '目录' : (nameOf(item.path).split('.').pop() || 'FILE').slice(0, 5).toUpperCase();
     const detail = document.createElement('div'); detail.className = 'file-detail';
-    const name = document.createElement('div'); name.className = 'file-name'; name.textContent = `${index + 1}. ${nameOf(item.path)}`;
+    const name = document.createElement('div'); name.className = 'file-name'; name.textContent = nameOf(item.path);
     const path = document.createElement('div'); path.className = 'file-path'; path.textContent = pathText(item.path);
     detail.append(name, path);
     const open = document.createElement('button'); open.textContent = '打开 ↗'; open.disabled = busy;
@@ -43,6 +57,7 @@ function onEvent(event) {
     message(event.value.message || '打开请求已处理。', 'receipt');
   }
   if (event.kind === 'confirm_open') {
+    showPage('files');
     confirmationId = event.request_id;
     $('confirm-name').textContent = nameOf(event.object.path);
     $('confirm-path').textContent = pathText(event.object.path);
@@ -56,8 +71,10 @@ function onEvent(event) {
 }
 async function run(kind, input = '') {
   if (busy || !api) return;
+  showPage('files');
   setBusy(true); closeConfirmation();
   if (kind === 'say' || kind === 'search') { message(input, 'user'); $('input').value = ''; }
+  if (kind === 'explain') message('解释这次电脑资源快照', 'user');
   $('activity').textContent = '正在处理…';
   const channel = new api.Channel(); channel.onmessage = onEvent;
   try {
@@ -81,6 +98,7 @@ $('composer').addEventListener('submit', (event) => { event.preventDefault(); co
 $('input').addEventListener('keydown', (event) => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('reset').addEventListener('click', () => run('reset'));
 $('cancel').addEventListener('click', () => { if (api) api.invoke('cancel').catch((error) => message(String(error), 'assistant', true)); });
+$('settings-cancel').addEventListener('click', () => $('cancel').click());
 $('approve').addEventListener('click', () => answer(true)); $('reject').addEventListener('click', () => answer(false));
 document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventListener('click', () => { $('input').value = button.dataset.prompt; $('input').focus(); }));
 async function init() {
@@ -91,9 +109,12 @@ async function init() {
     $('model-dot').classList.toggle('offline', Boolean(info.model_error));
     $('roots').replaceChildren();
     for (const root of info.roots) { const li = document.createElement('li'); li.textContent = pathText(root); $('roots').append(li); }
+    $('access-label').textContent = info.access_mode === 'full' ? '完全访问' : '安全模式';
+    $('scope-note').textContent = info.access_mode === 'full' ? '以上为默认查找位置；可以指定其他本机目录。操作仍需确认。' : '只在已选择的目录中查找。';
     const notes = [];
     if (info.model_error) notes.push(info.model_error);
-    if (!info.roots.length) notes.push('还没有查找目录。请运行 daosh setup 选择目录，然后重新打开桌面入口。');
+    if (!info.roots.length && info.access_mode !== 'full') notes.push('还没有查找目录。请在设置 → 访问权限中选择目录。');
+    $('config-notice').hidden = !notes.length;
     if (notes.length) { $('config-notice').textContent = notes.join('\n'); $('config-notice').hidden = false; }
   } catch (error) { $('config-notice').textContent = String(error); $('config-notice').hidden = false; $('activity').textContent = '配置未能加载，请修正后重启入口。'; }
 }

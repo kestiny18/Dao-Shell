@@ -4,7 +4,10 @@ const api = window.__TAURI__?.core;
 let busy = false;
 let confirmationId = null;
 let currentPage = 'home';
+const pageScroll = new Map();
 function showPage(page) {
+  const scroller = document.querySelector('.content-scroll');
+  pageScroll.set(currentPage, scroller.scrollTop);
   currentPage = page;
   for (const name of ['home', 'files', 'settings']) $(`page-${name}`).hidden = name !== page;
   $('entry-footer').hidden = page === 'settings';
@@ -12,6 +15,7 @@ function showPage(page) {
   document.querySelectorAll('[data-page]').forEach((button) => {
     if (button.dataset.page === page) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
+  scroller.scrollTop = pageScroll.get(page) || 0;
   document.dispatchEvent(new CustomEvent('pagechange', { detail:page }));
 }
 document.querySelectorAll('[data-page]').forEach((button) => button.addEventListener('click', () => showPage(button.dataset.page)));

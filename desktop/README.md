@@ -11,10 +11,20 @@ From the repository root in PowerShell:
 .\scripts\desktop.ps1 run
 ```
 
-Open Settings → Models to add a connection, enter its model names and API key,
-test the connection, select a default model and save. Existing CLI settings are
+Open Settings at the bottom left → Models. Choose DeepSeek, OpenAI or Custom,
+select a model and enter its API key, then test and save. Official service addresses
+are filled automatically; Custom supports other compatible services and local models.
+Other model names and multiple models remain available. Existing CLI settings are
 imported automatically. Saved changes apply between requests and start a new
 session; navigating between pages preserves the current conversation.
+
+Drag the divider to adjust sidebar width, or focus it and use the arrow keys;
+double-click restores the default. The computer overview offers cards or a list
+for registered apps, with local icons where available and initials otherwise.
+Sidebar width and app view are remembered on this device.
+
+The existing green D/chevron mark is explicitly configured in `bundle.icon` as
+both PNG and Windows ICO. Installer generation remains a separate release step.
 
 Keys can remain in this desktop process or be saved in Windows Credential Manager.
 A temporary key from another CLI process is not available here. Configured

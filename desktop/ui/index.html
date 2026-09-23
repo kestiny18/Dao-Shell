@@ -12,12 +12,13 @@
       <nav class="main-nav" aria-label="主导航">
         <button data-page="home" aria-current="page">⌂ <span>我的电脑</span></button>
         <button data-page="files">⌕ <span>文件</span></button>
-        <button data-page="settings">⚙ <span>设置</span></button>
       </nav>
       <div class="scope-block"><div class="side-label" id="access-label">受限访问</div><ul id="roots"><li>正在读取配置…</li></ul><p class="scope-note" id="scope-note">只在你已选择的目录中查找。</p></div>
       <div class="connection"><span class="dot" id="model-dot"></span><div id="model-label">正在读取模型配置</div></div>
+      <nav class="main-nav bottom-nav" aria-label="应用设置"><button data-page="settings">⚙ <span>设置</span></button></nav>
       <div class="preview">开发预览 · 0.1<br>操作前，始终由你决定。</div>
     </aside>
+    <div id="sidebar-resize" role="separator" tabindex="0" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin="170" aria-valuemax="360" aria-valuenow="205" title="拖动调整宽度，双击恢复；也可用左右方向键"></div>
     <main>
       <header><span id="page-title">我的电脑</span><span class="local-label">◇ 本地观察，明确范围</span></header>
       <div class="content-scroll">
@@ -28,7 +29,7 @@
           <div class="section-heading"><h2>磁盘空间</h2><span id="observed-at">尚未采样</span></div><div id="disks" class="disks"></div>
           <div class="home-actions"><button id="explain-home" disabled>让模型解释这次资源快照 ↗</button><small>仅在点击后发送本次 CPU、内存、磁盘与前 5 个进程采样；不发送应用清单。</small></div>
           <details class="card"><summary>网络接口 <span id="network-count"></span></summary><p id="network-note"></p><div id="networks"></div></details>
-          <details class="card"><summary>已登记应用 <span id="app-count"></span></summary><p id="app-note"></p><label class="sr-only" for="app-filter">筛选应用</label><input id="app-filter" placeholder="按名称筛选应用"><div id="applications" class="application-list"></div></details>
+          <details class="card"><summary>已登记应用 <span id="app-count"></span></summary><p id="app-note"></p><div class="app-toolbar"><label class="sr-only" for="app-filter">筛选应用</label><input id="app-filter" placeholder="按名称筛选应用"><div class="view-switch" role="group" aria-label="应用显示方式"><button type="button" data-app-view="cards" aria-pressed="true">卡片</button><button type="button" data-app-view="list" aria-pressed="false">列表</button></div></div><div id="applications" class="application-list" data-view="cards"></div></details>
           <p class="scope-note">概览直接从本机读取，不自动调用模型。短时采样不能单独确定卡顿根因。</p>
         </section>
         <section id="page-files" class="page" hidden>
@@ -42,14 +43,15 @@
           <div id="settings-status" role="status" class="notice" hidden></div>
           <form id="settings-form" class="settings-controls">
             <section id="settings-models">
-              <div class="setting-group"><h2>服务连接</h2><p>一个连接可以保存多个模型。协议为 Chat Completions 兼容格式。</p><div class="inline-fields"><label>当前连接<select id="connection-list"></select></label><button type="button" id="add-connection">＋ 添加连接</button><button type="button" id="remove-connection">移除连接</button></div>
-                <div id="connection-fields"><label>服务预设<select id="provider-preset"><option value="custom">自定义兼容服务</option value="deepseek">DeepSeek</option><option value="local">本机兼容服务</option></select></label>
-                <label>连接名称<input id="connection-label" maxlength="120" placeholder="例如：我的 DeepSeek"></label>
-                <label>请求地址<input id="connection-endpoint" maxlength="4096" placeholder="https://…/v1/chat/completions"></label>
-                <label>模型名称 <small>每行一个，填写服务提供的模型 ID</small><textarea id="connection-models" rows="3" placeholder="例如：deepseek-flash"></textarea></label>
+              <div class="setting-group"><h2>连接模型服务</h2><p>选择服务和模型，填入 API Key，再测试并保存。</p><div class="inline-fields"><label>已添加的服务<select id="connection-list"></select></label><button type="button" id="add-connection">＋ 添加服务</button><button type="button" id="remove-connection">移除服务</button></div>
+                <div id="connection-fields"><label>模型服务<select id="provider-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义</option></select></label>
+                <p id="provider-help"></p>
+                <label id="endpoint-field">服务地址 <small>填写完整的 Chat Completions 地址；本机模型也可在这里连接。</small><input id="connection-endpoint" maxlength="4096" placeholder="https://…/v1/chat/completions"></label>
+                <label id="model-choice-field">模型<select id="model-preset"></select></label>
+                <label id="custom-model-field">模型名称 <small>填写服务提供的模型 ID，每行一个。</small><textarea id="connection-models" rows="2" placeholder="填写模型名称"></textarea></label>
                 <label>API Key <small id="credential-state">尚未设置</small><input id="connection-key" type="password" autocomplete="off" placeholder="留空保留已有密钥"></label>
                 <label class="check-row"><input id="persist-key" type="checkbox" checked>保存到 Windows 凭据管理器</label>
-                <details><summary>高级：凭据引用</summary><label>环境变量名称<input id="connection-env" maxlength="128"></label><p>已有环境变量优先于系统保存的密钥。新输入的密钥在本次进程内优先使用；本机免密服务可留空。</p></details>
+                <details><summary>更多设置</summary><label>服务备注<input id="connection-label" maxlength="120" placeholder="例如：我的 DeepSeek"></label><label>密钥环境变量<input id="connection-env" maxlength="128"></label><p>已有环境变量优先于系统保存的密钥。新输入的密钥在本次进程内优先使用；本机免密服务可留空。</p></details>
                 <div class="inline-fields"><button type="button" id="test-model">测试此连接的第一个模型</button><small>使用虚构样例，最多两次请求，可能产生费用；不发送本机文件。</small></div></div>
               </div>
               <div class="setting-group"><h2>默认模型</h2><label>用于新会话<select id="active-model"></select></label><p>保存配置与通过连接测试是两回事。保存后开始新会话，旧候选失效。</p></div>
@@ -64,6 +66,6 @@
       <footer id="entry-footer"><div class="activity" id="activity" role="status">准备就绪</div><form id="composer"><label class="sr-only" for="input">你想找什么文件</label><textarea id="input" rows="2" maxlength="16000" placeholder="用一句话找到文件，比如：找一下项目里的合同 PDF"></textarea><div class="composer-bottom"><label class="mode"><select id="mode" aria-label="输入方式"><option value="say">自然语言</option><option value="search">文件名搜索</option></select></label><div><button type="button" id="cancel" hidden>停止</button><button class="primary" id="send" type="submit">发送 ↑</button></div></div></form><p class="footnote">Enter 发送 · Shift + Enter 换行 · 文件查找只读取名称与元数据</p></footer>
     </main>
   </div>
-  <script src="app.js"></script><script src="settings.js"></script><script src="home.js"></script>
+  <script src="app.js"></script><script src="layout.js"></script><script src="settings.js"></script><script src="home.js"></script>
 </body>
 </html>

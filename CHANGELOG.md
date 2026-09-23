@@ -6,6 +6,9 @@
 
 ### 2026-09-22
 
+- Move Settings to the sidebar footer and add a remembered, keyboard-accessible resize divider. Add app cards/list selection with local icons and initials fallback.
+- Simplify model setup to DeepSeek / OpenAI / Custom, with model choices and automatic official endpoints. Fix the malformed DeepSeek option and preserve the active model when switching services.
+- Explicitly configure the existing D/chevron PNG and Windows ICO as bundle icons.
 - Complete native Windows acceptance with an isolated configuration and local synthetic model. Keep connection-test/save feedback next to the action and prevent expanded application details from creating an outer-window scrollbar.
 
 ### 2026-09-21

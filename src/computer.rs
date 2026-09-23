@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use sysinfo::{Networks, System};
 
+#[cfg(windows)]
+mod icons;
+
 pub fn overview(cancel: &Cancellation) -> Result<Value> {
     cancel.check()?;
     let mut networks = Networks::new_with_refreshed_list();
@@ -92,6 +95,7 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
         (!text.trim().is_empty()).then_some(text)
     }
     let mut items = Vec::new();
+    let mut icon_sources = std::collections::HashMap::new();
     let mut seen = BTreeSet::new();
     let mut partial = false;
     let mut readable_views = 0;
@@ -145,12 +149,33 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
                     let version = value(child.0, "DisplayVersion");
                     let publisher = value(child.0, "Publisher");
                     if seen.insert((name.clone(), version.clone(), publisher.clone())) {
+                        if let Some(source) = value(child.0, "DisplayIcon") {
+                            icon_sources.insert(items.len(), source);
+                        }
                         items.push(json!({"name":name,"version":version,"publisher":publisher}));
                     }
                 }
                 if index == 4095 {
                     partial = true;
                 }
+            }
+        }
+    }
+    // A bounded best-effort pass: registry icon paths never become UI file URLs.
+    // Missing/slow sources simply leave the name-based fallback visible.
+    let icon_started = Instant::now();
+    let mut cache = std::collections::HashMap::new();
+    for (index, item) in items.iter_mut().enumerate().take(128) {
+        cancel.check()?;
+        if icon_started.elapsed() > std::time::Duration::from_secs(2) {
+            break;
+        }
+        if let Some(source) = icon_sources.get(&index) {
+            let icon = cache
+                .entry(source.clone())
+                .or_insert_with(|| icons::load(source));
+            if let Some(icon) = icon {
+                item["icon"] = json!(icon);
             }
         }
     }

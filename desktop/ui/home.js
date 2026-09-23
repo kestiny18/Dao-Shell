@@ -1,4 +1,5 @@
 let homeSnapshot = null;
+let appView = readPreference('dao.appView', 'cards') === 'list' ? 'list' : 'cards';
 function humanBytes(value) {
   if (value == null || !Number.isFinite(value)) return '暂不可用';
   const units = ['B','KiB','MiB','GiB','TiB']; let index = 0;
@@ -10,9 +11,20 @@ function renderApps() {
   const query = $('app-filter').value.trim().toLowerCase();
   const matches = (homeSnapshot?.applications.items || []).filter((item) => item.name.toLowerCase().includes(query));
   $('applications').replaceChildren();
+  $('applications').dataset.view = appView;
+  document.querySelectorAll('[data-app-view]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.appView === appView)));
   for (const app of matches.slice(0, 100)) {
-    const row = textNode('div', '', 'observation-row');
-    row.append(textNode('strong', app.name), textNode('small', [app.version, app.publisher].filter(Boolean).join(' · ')));
+    const row = textNode('article', '', 'app-item');
+    const initials = Array.from(app.name.trim()).slice(0, 2).join('').toUpperCase();
+    const icon = textNode('div', initials, 'app-icon'); icon.setAttribute('aria-hidden', 'true');
+    if (typeof app.icon === 'string' && app.icon.length < 24000 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(app.icon)) {
+      const image = document.createElement('img'); image.alt = ''; image.src = app.icon;
+      image.addEventListener('error', () => icon.replaceChildren(document.createTextNode(initials)), { once:true });
+      icon.replaceChildren(image);
+    }
+    const info = textNode('div', '', 'app-info');
+    info.append(textNode('strong', app.name), textNode('small', [app.version, app.publisher].filter(Boolean).join(' · ') || '版本信息未登记'));
+    row.append(icon, info);
     $('applications').append(row);
   }
   if (matches.length > 100) $('applications').append(textNode('p', `显示前 100 项，共匹配 ${matches.length} 项；请缩小筛选。`));
@@ -56,5 +68,8 @@ async function refreshOverview() {
 }
 $('refresh-home').addEventListener('click', refreshOverview);
 $('app-filter').addEventListener('input', renderApps);
+document.querySelectorAll('[data-app-view]').forEach((button) => button.addEventListener('click', () => {
+  appView = button.dataset.appView; savePreference('dao.appView', appView); renderApps();
+}));
 $('explain-home').addEventListener('click', () => { if (homeSnapshot) run('explain'); });
 refreshOverview();

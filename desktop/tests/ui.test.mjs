@@ -28,7 +28,7 @@ async function fixture() {
     if (command === 'cancel') { pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['app.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['app.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -53,8 +53,11 @@ test('file names hide internal references, navigation preserves conversation, em
   assert.equal(f.$('candidate-list').querySelector('.file-name').textContent,'合同 <script>.txt');
   assert.equal(f.$('candidate-list').querySelector('script'),null);
   assert.ok(!f.$('candidate-list').textContent.includes('internal-object-id'));
+  const scroller=f.w.document.querySelector('.content-scroll');scroller.scrollTop=125;
   f.w.document.querySelector('[data-page="settings"]').click();
+  assert.equal(scroller.scrollTop,0);
   f.w.document.querySelector('[data-page="files"]').click();
+  assert.equal(scroller.scrollTop,125);
   assert.match(f.$('conversation').textContent,/fixture response/);
   f.$('input').value='absent';f.submit('composer');await f.tick();
   assert.equal(f.$('candidate-panel').hidden,true);
@@ -82,4 +85,48 @@ test('settings retain multiple connections, test drafts, save selected model and
   assert.ok(!JSON.stringify(saved.config).includes('synthetic-secret'));
   assert.equal(f.$('connection-key').value,'');
   assert.equal(f.w.document.documentElement.dataset.theme,'dark');
+});
+
+test('provider choices are complete and switching services updates the active model without forwarding a key',async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  assert.deepEqual([...f.$('provider-preset').options].map(o=>o.textContent),['DeepSeek','OpenAI','自定义']);
+  f.change('provider-preset','deepseek');
+  assert.equal(f.$('connection-endpoint').value,'https://api.deepseek.com/chat/completions');
+  assert.equal(f.$('endpoint-field').hidden,true);
+  assert.equal(f.$('custom-model-field').hidden,true);
+  f.change('connection-key','synthetic-deepseek-key');
+  f.change('provider-preset','openai');
+  assert.equal(f.$('connection-key').value,'');
+  assert.equal(f.$('connection-endpoint').value,'https://api.openai.com/v1/chat/completions');
+  assert.equal(f.$('model-preset').value,'gpt-5-mini');
+  f.change('model-preset','gpt-4.1');f.submit('settings-form');await f.tick();
+  const saved=f.calls.find(c=>c.command==='save_settings').args.update;
+  assert.equal(saved.keys.length,0);
+  assert.equal(saved.config.models.choices.find(m=>m.id===saved.config.models.active).name,'gpt-4.1');
+  assert.equal(f.$('provider-preset').value,'openai');
+  f.change('provider-preset','custom');assert.equal(f.$('endpoint-field').hidden,false);
+  f.change('connection-endpoint','http://127.0.0.1:11434/v1/chat/completions');
+  f.change('connection-models','local-model');f.submit('settings-form');await f.tick();
+  assert.equal(f.$('provider-preset').value,'custom');
+  assert.equal(f.$('connection-env').value,'');
+  f.change('connection-endpoint','https://example.invalid/v1/chat/completions');
+  f.change('connection-key','synthetic-custom-key');f.$('persist-key').checked=false;
+  f.submit('settings-form');await f.tick();
+  const custom=f.calls.filter(c=>c.command==='save_settings').at(-1).args.update;
+  assert.match(custom.config.models.connections[0].api_key_env,/^DAO_MODEL_/);
+  assert.equal(custom.keys[0].key,'synthetic-custom-key');
+});
+
+test('sidebar resizing is bounded and application view changes preserve filtering',async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  f.$('sidebar-resize').dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'End',bubbles:true}));
+  assert.equal(f.w.localStorage.getItem('dao.sidebarWidth'),'360');
+  f.w.innerWidth=680;f.w.dispatchEvent(new f.w.Event('resize'));
+  assert.equal(f.$('sidebar-resize').getAttribute('aria-valuenow'),'220');
+  assert.equal(f.$('applications').dataset.view,'cards');
+  f.$('app-filter').value='no match';f.$('app-filter').dispatchEvent(new f.w.Event('input'));
+  f.w.document.querySelector('[data-app-view="list"]').click();
+  assert.equal(f.$('applications').dataset.view,'list');
+  assert.match(f.$('applications').textContent,/没有匹配/);
+  assert.equal(f.w.localStorage.getItem('dao.appView'),'list');
 });

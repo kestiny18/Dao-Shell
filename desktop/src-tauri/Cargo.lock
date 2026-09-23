@@ -589,10 +589,12 @@ name = "dao-shell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "ctrlc",
  "dirs",
+ "png 0.18.1",
  "reqwest 0.12.28",
  "rpassword",
  "rusqlite",

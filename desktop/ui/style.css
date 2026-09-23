@@ -34,7 +34,10 @@ input, select, textarea { border: 1px solid var(--line); border-radius: 7px; pad
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
 .primary { background: #315e47; color: white; border-color: #315e47; }
 .primary:hover { background: #254c39; }
-.shell { height: 100vh; display: grid; grid-template-columns: 205px minmax(0, 1fr); overflow: hidden; }
+.shell { height: 100vh; display: grid; grid-template-columns: var(--sidebar-width, 205px) 6px minmax(0, 1fr); overflow: hidden; }
+#sidebar-resize { cursor: col-resize; touch-action: none; background: var(--sidebar); border-right: 1px solid var(--line); }
+#sidebar-resize:hover, #sidebar-resize:focus-visible, .resizing-sidebar #sidebar-resize { background: var(--accent); outline: none; }
+.resizing-sidebar { cursor: col-resize; user-select: none; }
 aside { padding: 28px 18px; background: var(--sidebar); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 22px; min-height: 0; overflow: auto; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .mark { font-family: Georgia, serif; font-size: 27px; letter-spacing: -2px; color: var(--accent); }
@@ -46,6 +49,7 @@ aside { padding: 28px 18px; background: var(--sidebar); border-right: 1px solid 
 .main-nav button { text-align: left; border: 0; background: transparent; }
 .main-nav button span { margin-left: 12px; }
 .main-nav button[aria-current="page"] { background: var(--tint); color: var(--accent); font-weight: 600; }
+.bottom-nav { flex-shrink: 0; }
 .side-label { font-size: 12px; color: var(--muted); }
 .scope-block { flex: 1; min-height: 80px; }
 #roots { list-style: none; padding: 0; margin: 10px 0; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; color: var(--muted); }
@@ -83,7 +87,19 @@ summary span { color: var(--muted); font-size: 11px; }
 .observation-row { display: flex; flex-direction: column; gap: 5px; padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .observation-row strong { font-size: 12px; font-weight: 500; }
 .observation-row small { font-size: 11px; color: var(--muted); }
-.application-list { max-height: 320px; overflow: auto; }
+.app-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
+.view-switch { display: flex; gap: 4px; }
+.view-switch button { font-size: 12px; padding: 6px 12px; }
+.view-switch button[aria-pressed="true"] { color: var(--accent); background: var(--tint); }
+.application-list { max-height: 360px; overflow: auto; padding: 2px; }
+.application-list[data-view="cards"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 10px; }
+.app-item { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 10px; border-bottom: 1px solid var(--line); }
+.application-list[data-view="cards"] .app-item { flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; }
+.app-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 9px; flex: 0 0 40px; background: var(--tint); color: var(--accent); font-size: 15px; font-weight: 600; }
+.app-icon img { width: 32px; height: 32px; object-fit: contain; border-radius: 4px; }
+.app-info { min-width: 0; display: grid; gap: 6px; overflow-wrap: anywhere; }
+.app-info strong { font-size: 12px; font-weight: 600; }
+.app-info small { font-size: 11px; color: var(--muted); }
 .settings-tabs { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
 .settings-tabs button { background: transparent; border-color: transparent; }
 .settings-tabs button[aria-pressed="true"] { background: var(--tint); color: var(--accent); }
@@ -136,7 +152,6 @@ footer { flex-shrink: 0; padding: 12px 0 15px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 [hidden] { display: none !important; }
 @media (max-width: 850px) {
-  .shell { grid-template-columns: 170px minmax(0, 1fr); }
   aside { padding: 24px 12px; }
   main { padding: 0 20px; }
   .local-label { display: none; }

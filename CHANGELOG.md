@@ -4,6 +4,11 @@
 
 ## Unreleased — 第一版公开开发预览
 
+### 2026-09-24
+
+- Add a single Windows x64 preview setup executable with an offline WebView2 installer, D/chevron icon, current-user installation and separate program/configuration directories.
+- Bundle the GNU WebView2 loader explicitly, include trial instructions and notices, and verify the release executable uses the Windows GUI subsystem. Validate local installation, startup with a minimal PATH, uninstallation and configuration preservation.
+
 ### 2026-09-22
 
 - Move Settings to the sidebar footer and add a remembered, keyboard-accessible resize divider. Add app cards/list selection with local icons and initials fallback.

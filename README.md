@@ -59,7 +59,7 @@ The preview is for early users willing to share feedback. Start with Windows, a 
 
 Follow the [getting-started guide](docs/GETTING_STARTED.md) for setup and a first trial. The [documentation index](docs/README.en.md) lists further reading; implementation notes and development logs currently remain in Chinese.
 
-Want to try the window? See the [desktop preview](desktop/README.md). Configure your model in the window or reuse your CLI settings. It currently runs from source; it is not an installer release.
+Want to try the window? See the [desktop preview](desktop/README.md). Configure your model in the window or reuse your CLI settings. A Windows installer can now be built for sharing early trials with friends.
 
 **Project:** Dao-Shell · **Command:** `daosh` · **Prompt:** `dao >` · **Cargo package:** `dao-shell`
 

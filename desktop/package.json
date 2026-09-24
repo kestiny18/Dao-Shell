@@ -2,6 +2,11 @@
   "name": "dao-shell-desktop-ui-checks",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/*.test.mjs" },
-  "devDependencies": { "jsdom": "25.0.1" }
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.5",
+    "jsdom": "25.0.1"
+  }
 }

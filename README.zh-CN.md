@@ -66,7 +66,7 @@ Dao-Shell 采用 **build in public** 的方式推进：公开小步进展、关�
 
 [体验指南](docs/GETTING_STARTED.zh-CN.md) 包含获取、启动与模型配置；想运行源码，请看 [开发指南](docs/DEVELOPMENT.md)。
 
-想试试窗口版，可以查看 [桌面预览说明](desktop/README.md)：可在窗口里配置模型，也能复用已有 CLI 配置。目前从源码运行，尚未提供安装包。
+想试试窗口版，可以查看 [桌面预览说明](desktop/README.md)：可在窗口里配置模型，也能复用已有 CLI 配置。现在可以构建一个 Windows 安装包，分享给朋友试用。
 
 构建后的命令名是 `daosh`；Dao-Shell 是项目名称。
 

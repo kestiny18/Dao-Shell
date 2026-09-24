@@ -1,11 +1,17 @@
 # Dao-Shell desktop preview
 
 A small desktop entry for understanding your computer and finding files with natural language.
-This is a Windows development preview, not a packaged release.
+This is a Windows development preview. A single-file Windows x64 installer can
+be built for private trials; it is not a signed stable release.
 
 ## Try it on Windows
 
-From the repository root in PowerShell:
+For a shared trial build, double-click `Dao-Shell-0.1.0-windows-x64-setup.exe`,
+then open Dao-Shell from the desktop or Start menu. The installer includes the
+WebView2 offline installer and reuses an existing runtime. No Rust, Node.js or
+terminal is needed on the recipient's computer. Windows 10/11 x64 is the target.
+
+To run from source, use PowerShell at the repository root:
 
 ```powershell
 .\scripts\desktop.ps1 run
@@ -24,7 +30,7 @@ for registered apps, with local icons where available and initials otherwise.
 Sidebar width and app view are remembered on this device.
 
 The existing green D/chevron mark is explicitly configured in `bundle.icon` as
-both PNG and Windows ICO. Installer generation remains a separate release step.
+both PNG and Windows ICO, including the installer icon.
 
 Keys can remain in this desktop process or be saved in Windows Credential Manager.
 A temporary key from another CLI process is not available here. Configured
@@ -55,7 +61,7 @@ target application displayed the document.
 - Restricted or full path access; no desktop file move/write tools. CLI moves still require confirmation and a durable journal.
 - Session-local candidates, model history, cancellation and one-time confirmation.
 - Existing production search, not the experimental inventory backend.
-- Desktop model/access/theme settings. No tray service, global shortcut, installer or background agent.
+- Desktop model/access/theme settings and a Windows preview installer. No tray service, global shortcut, automatic updater or background agent.
 - Local CPU, memory, disk and device overview, interface traffic counters and Windows uninstall-registry records. Application records do not cover every Store or portable app; an interface IP does not prove internet reachability.
 
 Like the CLI, natural-language requests send the prompt and relevant tool results
@@ -104,6 +110,32 @@ test remains intentionally ignored). Native Windows verification completed on
 connection test/save/restart, navigation, file results, rejected opening, empty
 results and cancellation. Test/save feedback stays beside the corresponding
 action; expanding the app list keeps scrolling inside the content area.
-Cloud-model quality and clean-machine distribution remain separate follow-ups.
+Cloud-model quality and validation on a separate clean Windows machine remain
+follow-ups; local installation testing does not replace that check.
+
+## Build a shareable Windows installer
+
+```powershell
+.\scripts\package-desktop-windows.ps1
+```
+
+The script installs the pinned Tauri CLI locally, builds release code with the
+locked Cargo dependencies, bundles licenses and the Chinese trial guide, and
+writes the installer plus SHA-256 checksum to `dist/`. It uses two build jobs by
+default to bound peak memory (`-Jobs 4` overrides this). Packaging initially needs
+network access for build tools and Microsoft's WebView2 offline installer.
+
+The installed executable uses the Windows GUI subsystem, which the script checks
+before delivery. It launches without a console window. Program files default to
+`%LOCALAPPDATA%\Programs\Dao-Shell`; configuration stays in
+`%LOCALAPPDATA%\Dao-Shell`. Custom installation paths are supported. Uninstall
+removes packaged files and shortcuts, preserving model configuration and saved
+Windows credentials. The package includes neither a model key nor local settings.
+
+This preview is unsigned: Windows can show an unknown-publisher or reputation
+prompt. Share the source and checksum with testers; do not ask them to disable
+Windows protection. Only the setup executable is required for installation.
+
+Installer implementation reference: [Tauri Windows distribution](https://v2.tauri.app/distribute/windows-installer/).
 
 See the [experiment record](../docs/experiments/desktop-entry.md) for boundaries and evidence.

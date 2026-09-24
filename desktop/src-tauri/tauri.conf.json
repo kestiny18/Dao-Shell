@@ -9,5 +9,23 @@
     "windows": [{ "label": "main", "title": "Dao-Shell", "width": 1040, "height": 760, "minWidth": 680, "minHeight": 580 }],
     "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" }
   },
-  "bundle": { "active": false, "icon": ["icons/icon.png", "icons/icon.ico"] }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Dao-Shell contributors",
+    "shortDescription": "A small LLM-first shell for using your computer",
+    "licenseFile": "../../LICENSE",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer-hooks.nsh",
+        "startMenuFolder": "Dao-Shell"
+      }
+    }
+  }
 }

@@ -11,6 +11,7 @@
 ## 开发
 
 - [开发指南](DEVELOPMENT.md)：工具链、验证、代码结构与打包。
+- [Agent 开发工作流](workflow/README.md)：任务分工、独立验证、交接和完成条件。
 - [实现记录](IMPLEMENTATION.md)：已经完成的能力、测试证据与限制。
 - [MVP 方案](MVP.md)：产品边界、交互与技术决策。
 - [参与贡献](../CONTRIBUTING.md)：适合提交的场景、问题与代码变更。

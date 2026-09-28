@@ -21,8 +21,8 @@ Open Settings at the bottom left → Models. Choose DeepSeek, OpenAI or Custom,
 select a model and enter its API key, then test and save. Official service addresses
 are filled automatically; Custom supports other compatible services and local models.
 Other model names and multiple models remain available. Existing CLI settings are
-imported automatically. Saved changes apply between requests and start a new
-session; navigating between pages preserves the current conversation.
+imported automatically. Saved changes apply between requests and reset all model execution contexts and
+file candidates; visible conversation history is retained.
 
 Drag the divider to adjust sidebar width, or focus it and use the arrow keys;
 double-click restores the default. The computer overview offers cards or a list
@@ -51,9 +51,44 @@ or change your global PATH. There is no Node frontend build step.
 
 Try “找一下项目里的合同 PDF”, select a candidate, then confirm opening it.
 Natural language is the default. “文件名搜索” provides an explicit fallback
-without a model. Stop cancels the current request; New session clears history
-and candidates. An opening receipt reports the OS handoff, not proof that the
+without a model. Stop cancels the current request; New session creates an independent conversation. An opening receipt reports the OS handoff, not proof that the
 target application displayed the document.
+
+## Workspace and local history
+
+The fixed first tab is Overview (概览). New session creates a conversation in the
+sidebar; closing its tab preserves the session, and selecting it reopens the tab.
+Settings uses one closable tab. Hover or focus a session row to rename it; there is
+no session deletion control. Enter saves a name and Escape cancels editing. Names
+must be nonempty and fit within 512 UTF-8 bytes. Hover or focus a tab to reveal its
+close button. Closing the running session first asks to stop it,
+then waits for cancellation. Only one request runs at a time; other sessions can
+still be viewed and their drafts edited. Enter sends; Shift+Enter adds a line;
+IME composition does not submit.
+
+Sidebar collapse is temporarily hidden; older collapsed layouts open expanded.
+The divider still resizes the sidebar. History, drafts, open tabs, selected tab and sidebar width are
+saved to `workspace.json` beside the desktop configuration. By default this is
+`%LOCALAPPDATA%\Dao-Shell`; `DAO_SHELL_DESKTOP_CONFIG` also isolates workspace
+storage to that configuration's directory. Visible messages and drafts can contain
+private text and paths. They are stored locally as plain JSON, with no cloud sync.
+Uninstall continues to preserve this local data.
+
+Restart restores visible history only. Model/tool context, candidates, pending
+confirmations and active requests are never restored or replayed. The conversation
+shows a notice explaining that old references need a new description or search.
+No model call is made by restoration. Keys, raw model protocol, reasoning and
+capability tokens are excluded from the workspace schema. Text the user explicitly
+types remains ordinary visible history, so avoid typing secrets in conversations.
+
+Saving uses a synchronized temporary file and atomic replacement. Save errors stay
+visible with a retry button; a failed rename retains its editor and previous name. Exit
+waits for pending saves and asks before leaving after a failure. If restoration
+fails because data is damaged or the version is unsupported, the original file is
+preserved and automatic saving is blocked. Close the app, back up and move
+`workspace.json` out of the configuration directory, then restart to begin a new
+workspace. Do not remove the model configuration. Limits are 100 sessions,
+2,000 messages per session, 16,000 input characters and 8 MiB per workspace.
 
 ## Current scope
 

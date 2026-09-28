@@ -16,3 +16,4 @@ pub mod storage;
 pub mod computer;
 pub mod runtime;
 pub mod settings;
+pub mod workspace;

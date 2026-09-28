@@ -1,3 +1,4 @@
+use dao_shell::workspace::{Workspace, WorkspaceStore};
 use dao_shell::{
     config::Config,
     core::{FileObject, Operation},
@@ -6,20 +7,35 @@ use dao_shell::{
     settings::{self, ConnectionTest, SettingsUpdate, SettingsView},
 };
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::Mutex, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Mutex,
+    time::Duration,
+};
 use tauri::ipc::Channel;
 
 pub struct Bridge {
     config_path: PathBuf,
-    session: Mutex<Option<FileSession>>,
+    sessions: Mutex<Sessions>,
+    active: Mutex<Option<(String, String)>>,
+    workspace: Mutex<WorkspaceStore>,
     pub control: RequestControl,
     overview: Mutex<Option<Value>>,
-    configuration: Mutex<String>,
 }
-struct Release<'a>(&'a RequestControl);
+#[derive(Default)]
+struct Sessions {
+    contexts: HashMap<String, FileSession>,
+    registered: HashSet<String>,
+    configuration: String,
+}
+struct Release<'a>(&'a Bridge);
 impl Drop for Release<'_> {
     fn drop(&mut self) {
-        self.0.release();
+        if let Ok(mut owner) = self.0.active.lock() {
+            *owner = None;
+            self.0.control.release();
+        }
     }
 }
 fn error(e: impl std::fmt::Display) -> String {
@@ -36,52 +52,67 @@ impl Bridge {
     }
     fn with_path(config_path: PathBuf) -> Self {
         Self {
+            workspace: Mutex::new(WorkspaceStore::new(
+                config_path.with_file_name("workspace.json"),
+            )),
             config_path,
-            session: Mutex::new(None),
+            sessions: Mutex::new(Sessions::default()),
+            active: Mutex::new(None),
             control: RequestControl::default(),
             overview: Mutex::new(None),
-            configuration: Mutex::new(String::new()),
         }
     }
     fn path(&self) -> PathBuf {
         self.config_path.clone()
     }
-    fn ensure_session(&self, session: &mut Option<FileSession>) -> Result<(), String> {
-        let config = Config::load(&self.path()).map_err(error)?;
-        let encoded = serde_json::to_string(&config).map_err(error)?;
-        let mut previous = self
-            .configuration
+    pub fn load_workspace(&self) -> Result<Workspace, String> {
+        let value = self
+            .workspace
             .lock()
-            .map_err(|_| "配置状态不可用".to_string())?;
-        if session.is_none() || *previous != encoded {
-            // Also honor CLI edits before the next request; old IDs cannot cross policies.
-            *session = Some(FileSession::new(&config, self.control.cancellation()).map_err(error)?);
-            *previous = encoded;
+            .map_err(error)?
+            .load()
+            .map_err(error)?;
+        let mut sessions = self.sessions.lock().map_err(error)?;
+        sessions
+            .registered
+            .extend(value.sessions.iter().map(|s| s.id.clone()));
+        Ok(value)
+    }
+    pub fn save_workspace(&self, value: Workspace) -> Result<(), String> {
+        self.workspace
+            .lock()
+            .map_err(error)?
+            .save(&value)
+            .map_err(error)
+    }
+    pub fn register(&self, id: String) -> Result<(), String> {
+        uuid::Uuid::parse_str(&id).map_err(error)?;
+        let mut sessions = self.sessions.lock().map_err(error)?;
+        if sessions.registered.len() >= 100 {
+            return Err("会话数量已达 100，请继续使用已有会话".into());
         }
+        sessions.registered.insert(id);
         Ok(())
     }
     pub fn info(&self) -> Result<Value, String> {
-        let mut session = self
-            .session
-            .try_lock()
-            .map_err(|_| "正在处理请求".to_string())?;
-        self.ensure_session(&mut session)?;
-        serde_json::to_value(session.as_ref().unwrap().info()).map_err(error)
+        let config = Config::load(&self.path()).map_err(error)?;
+        let session = FileSession::new(&config, self.control.cancellation()).map_err(error)?;
+        serde_json::to_value(session.info()).map_err(error)
     }
     pub fn settings(&self) -> Result<SettingsView, String> {
         settings::read(&self.path()).map_err(error)
     }
     pub fn save(&self, update: SettingsUpdate) -> Result<SettingsView, String> {
         self.reserve()?;
-        let _release = Release(&self.control);
-        let mut session = self.session.lock().map_err(|_| "会话不可用".to_string())?;
+        let _release = Release(self);
+        let mut sessions = self.sessions.lock().map_err(error)?;
         let saved = settings::save(&self.path(), update).map_err(error)?;
-        *session = None;
+        sessions.contexts.clear();
         Ok(saved)
     }
     pub fn overview(&self) -> Result<Value, String> {
         self.reserve()?;
-        let _release = Release(&self.control);
+        let _release = Release(self);
         let snapshot =
             dao_shell::computer::overview(&self.control.cancellation()).map_err(error)?;
         *self.overview.lock().map_err(|_| "概览不可用".to_string())? = Some(snapshot.clone());
@@ -89,7 +120,7 @@ impl Bridge {
     }
     pub fn test(&self, request: ConnectionTest) -> Result<Value, String> {
         self.reserve()?;
-        let _release = Release(&self.control);
+        let _release = Release(self);
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -103,20 +134,41 @@ impl Bridge {
         serde_json::to_value(report).map_err(error)
     }
     pub fn reserve(&self) -> Result<(), String> {
+        let _owner = self.active.lock().map_err(error)?;
         self.control.reserve().map_err(error)
+    }
+    pub fn reserve_for(&self, session_id: &str, request_id: &str) -> Result<(), String> {
+        uuid::Uuid::parse_str(request_id).map_err(error)?;
+        let mut owner = self.active.lock().map_err(error)?;
+        if !self
+            .sessions
+            .lock()
+            .map_err(error)?
+            .registered
+            .contains(session_id)
+        {
+            return Err("会话不存在".into());
+        }
+        self.control.reserve().map_err(error)?;
+        *owner = Some((session_id.into(), request_id.into()));
+        Ok(())
     }
     pub fn execute(
         &self,
+        session_id: &str,
+        request_id: &str,
         kind: &str,
         input: String,
         channel: Channel<Value>,
     ) -> Result<Reply, String> {
-        let _release = Release(&self.control);
+        let _release = Release(self);
+        if input.len() > 64000 {
+            return Err("输入过长".into());
+        }
         let action = match kind {
             "say" => Action::Say(input),
             "search" => Action::Search(input),
             "open" => Action::Open(input),
-            "reset" => Action::Reset,
             "explain" => {
                 let snapshot = self
                     .overview
@@ -130,11 +182,33 @@ impl Bridge {
             }
             _ => return Err("不支持的请求".into()),
         };
-        let mut session = self
-            .session
-            .lock()
-            .map_err(|_| "会话不可用，请重启".to_string())?;
-        self.ensure_session(&mut session)?;
+        if self.active.lock().map_err(error)?.as_ref()
+            != Some(&(session_id.into(), request_id.into()))
+        {
+            return Err("请求已失效".into());
+        }
+        let config = Config::load(&self.path()).map_err(error)?;
+        let encoded = serde_json::to_string(&config).map_err(error)?;
+        let (mut session, context_reset, configuration_changed) = {
+            let mut sessions = self.sessions.lock().map_err(error)?;
+            let changed = sessions.configuration != encoded;
+            if changed {
+                sessions.contexts.clear();
+                sessions.configuration = encoded;
+            }
+            let existing = sessions.contexts.remove(session_id);
+            let reset = existing.is_none();
+            (
+                match existing {
+                    Some(s) => s,
+                    None => {
+                        FileSession::new(&config, self.control.cancellation()).map_err(error)?
+                    }
+                },
+                reset,
+                changed,
+            )
+        };
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -143,13 +217,48 @@ impl Bridge {
         let mut ui = DesktopInteraction {
             bridge: self,
             channel,
+            session_id,
+            request_id,
         };
-        Ok(runtime.block_on(session.as_mut().unwrap().execute(action, &mut ui)))
+        if context_reset {
+            ui.send(json!({"kind":"context_reset", "configuration_changed":configuration_changed}));
+        }
+        let reply = runtime.block_on(session.execute(action, &mut ui));
+        self.sessions
+            .lock()
+            .map_err(error)?
+            .contexts
+            .insert(session_id.into(), session);
+        Ok(reply)
     }
     pub fn cancel(&self) {
         self.control.cancel();
     }
-    pub fn confirm(&self, id: &str, approved: bool) -> Result<(), String> {
+    pub fn cancel_for(&self, session_id: &str, request_id: &str) -> Result<(), String> {
+        let owner = self.active.lock().map_err(error)?;
+        if owner.as_ref() != Some(&(session_id.into(), request_id.into())) {
+            return Err("请求已结束".into());
+        }
+        self.control.cancel();
+        Ok(())
+    }
+    pub fn confirm(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        id: &str,
+        approved: bool,
+    ) -> Result<(), String> {
+        let owner = self.active.lock().map_err(error)?;
+        if owner.as_ref() != Some(&(session_id.into(), request_id.into())) {
+            return Err("请求已失效".into());
+        }
+        let current =
+            serde_json::to_string(&Config::load(&self.path()).map_err(error)?).map_err(error)?;
+        if self.sessions.lock().map_err(error)?.configuration != current {
+            self.control.cancel();
+            return Err("配置已变更，此确认已失效，请重新搜索".into());
+        }
         self.control.answer(id, approved).map_err(error)
     }
 }
@@ -157,9 +266,13 @@ impl Bridge {
 struct DesktopInteraction<'a> {
     bridge: &'a Bridge,
     channel: Channel<Value>,
+    session_id: &'a str,
+    request_id: &'a str,
 }
 impl DesktopInteraction<'_> {
-    fn send(&self, value: Value) {
+    fn send(&self, mut value: Value) {
+        value["session_id"] = self.session_id.into();
+        value["execution_id"] = self.request_id.into();
         if self.channel.send(value).is_err() {
             self.bridge.cancel();
         }
@@ -199,9 +312,18 @@ mod tests {
         config.save(&path).unwrap();
         std::fs::write(directory.join("fixture.txt"), "synthetic").unwrap();
         let bridge = Bridge::with_path(path.clone());
-        bridge.reserve().unwrap();
+        let sid = uuid::Uuid::new_v4().to_string();
+        let rid = uuid::Uuid::new_v4().to_string();
+        bridge.register(sid.clone()).unwrap();
+        bridge.reserve_for(&sid, &rid).unwrap();
         let found = bridge
-            .execute("search", "fixture.txt".into(), Channel::new(|_| Ok(())))
+            .execute(
+                &sid,
+                &rid,
+                "search",
+                "fixture.txt".into(),
+                Channel::new(|_| Ok(())),
+            )
             .unwrap();
         assert_eq!(found.items.len(), 1);
         let id = found.items[0].id.clone();
@@ -218,14 +340,79 @@ mod tests {
         );
         bridge.control.release();
         Config::default().save(&path).unwrap();
-        bridge.reserve().unwrap();
+        bridge.reserve_for(&sid, &rid).unwrap();
         let stale = bridge
-            .execute("open", id, Channel::new(|_| Ok(())))
+            .execute(&sid, &rid, "open", id, Channel::new(|_| Ok(())))
             .unwrap();
         assert!(stale.error);
         assert!(stale.message.contains("已失效"));
         std::fs::remove_file(directory.join("fixture.txt")).unwrap();
         std::fs::remove_file(path).unwrap();
         std::fs::remove_dir(directory).unwrap();
+    }
+    #[test]
+    fn sessions_own_candidates_and_cancel_confirmation_cannot_cross_requests() {
+        let dir = std::env::temp_dir().join(format!("dao-p1-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let config = Config {
+            read_roots: vec![dir.clone()],
+            ..Default::default()
+        };
+        let path = dir.join("config.json");
+        config.save(&path).unwrap();
+        std::fs::write(dir.join("sample.txt"), "synthetic").unwrap();
+        let bridge = Bridge::with_path(path.clone());
+        let a = uuid::Uuid::new_v4().to_string();
+        let b = uuid::Uuid::new_v4().to_string();
+        let r = uuid::Uuid::new_v4().to_string();
+        let later = uuid::Uuid::new_v4().to_string();
+        bridge.register(a.clone()).unwrap();
+        bridge.register(b.clone()).unwrap();
+        bridge.reserve_for(&a, &r).unwrap();
+        let found = bridge
+            .execute(
+                &a,
+                &r,
+                "search",
+                "sample.txt".into(),
+                Channel::new(|_| Ok(())),
+            )
+            .unwrap();
+        assert_eq!(found.items.len(), 1);
+        bridge.reserve_for(&b, &r).unwrap();
+        let foreign = bridge
+            .execute(
+                &b,
+                &r,
+                "open",
+                found.items[0].id.clone(),
+                Channel::new(|_| Ok(())),
+            )
+            .unwrap();
+        assert!(foreign.error);
+        bridge.reserve_for(&a, &r).unwrap();
+        assert!(bridge.reserve_for(&b, &later).is_err());
+        let c = bridge.control.confirmation(Duration::from_secs(2)).unwrap();
+        assert!(bridge.confirm(&b, &r, &c.id, true).is_err());
+        assert!(bridge.cancel_for(&b, &r).is_err());
+        bridge.cancel_for(&a, &r).unwrap();
+        assert!(!bridge.control.wait(&c));
+        assert!(bridge.confirm(&a, &r, &c.id, true).is_err());
+        drop(Release(&bridge));
+        bridge.reserve_for(&b, &later).unwrap();
+        assert!(bridge.cancel_for(&a, &r).is_err());
+        assert!(!bridge.control.cancellation().is_cancelled());
+        drop(Release(&bridge));
+        let unknown = uuid::Uuid::new_v4().to_string();
+        assert!(bridge.reserve_for(&unknown, &r).is_err());
+        bridge.reserve_for(&b, &later).unwrap();
+        let c = bridge.control.confirmation(Duration::from_secs(2)).unwrap();
+        Config::default().save(&path).unwrap();
+        assert!(bridge.confirm(&b, &later, &c.id, true).is_err());
+        assert!(!bridge.control.wait(&c));
+        drop(Release(&bridge));
+        std::fs::remove_file(dir.join("sample.txt")).unwrap();
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 }

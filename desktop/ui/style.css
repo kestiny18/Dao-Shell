@@ -48,13 +48,9 @@ aside { padding: 28px 18px; background: var(--sidebar); border-right: 1px solid 
 .main-nav { display: grid; gap: 5px; }
 .main-nav button { text-align: left; border: 0; background: transparent; }
 .main-nav button span { margin-left: 12px; }
-.main-nav button[aria-current="page"] { background: var(--tint); color: var(--accent); font-weight: 600; }
 .bottom-nav { flex-shrink: 0; }
 .side-label { font-size: 12px; color: var(--muted); }
-.scope-block { flex: 1; min-height: 80px; }
-#roots { list-style: none; padding: 0; margin: 10px 0; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; color: var(--muted); }
-#roots li { padding: 5px 0; }
-.scope-note, .preview { font-size: 11px; color: var(--muted); line-height: 1.8; }
+.scope-note { font-size: 11px; color: var(--muted); line-height: 1.8; }
 .connection { display: flex; align-items: center; gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
 .dot { width: 7px; height: 7px; background: #839b86; border-radius: 50%; flex-shrink: 0; }
 .dot.offline { background: #ba8759; }
@@ -130,7 +126,6 @@ summary span { color: var(--muted); font-size: 11px; }
 .candidates { padding-bottom: 20px; }
 #candidate-list { display: grid; gap: 7px; max-height: 260px; overflow: auto; }
 .file-row { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 12px; }
-.file-icon { font-size: 9px; border: 1px solid var(--line); padding: 10px 5px; border-radius: 5px; color: var(--muted); min-width: 35px; text-align: center; }
 .file-detail { min-width: 0; flex: 1; }
 .file-name { font-size: 13px; overflow-wrap: anywhere; }
 .file-path { font-size: 11px; color: var(--muted); margin-top: 5px; overflow-wrap: anywhere; }
@@ -161,3 +156,36 @@ footer { flex-shrink: 0; padding: 12px 0 15px; }
   .page-heading { align-items: flex-start; flex-direction: column; }
   h1 { font-size: 25px; }
 }
+
+/* Workspace navigation stays reachable independently of conversation scrolling. */
+aside { overflow: hidden; gap: 14px; }
+#session-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.session-row { display: flex; align-items: center; gap: 0; margin-bottom: 2px; border-radius: 8px; }
+.session-row:hover, .session-row:focus-within { background: var(--tint); }
+.session-row > button { border: 0; background: transparent; }
+.session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 10px; }
+.session-rename { flex: 0 0 28px; padding: 6px; opacity: 0; pointer-events: none; }
+.session-row:hover .session-rename, .session-row:focus-within .session-rename { opacity: 1; pointer-events: auto; }
+.session-rename-form { display: flex; flex-wrap: wrap; width: 100%; gap: 3px; padding: 4px; }
+.session-rename-form input { width: 0; min-width: 40px; flex: 1; padding: 6px; }
+.session-rename-form button { padding: 4px 6px; }
+.rename-error { flex-basis: 100%; color: var(--danger); overflow-wrap: anywhere; }
+.rename-error:empty { display: none; }
+#workspace-tabs { display: flex; flex-shrink: 0; overflow-x: auto; gap: 0; padding: 12px 0 0; }
+.workspace-tab { display: flex; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 8px 8px 0 0; max-width: 230px; }
+.workspace-tab + .workspace-tab { border-left: 0; }
+.workspace-tab button { border: 0; background: transparent; padding: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace-tab.selected { background: var(--tint); }
+.workspace-tab button[role=tab] { min-width: 65px; }
+.workspace-tab .tab-close { flex: 0 0 28px; opacity: 0; pointer-events: none; }
+.workspace-tab:hover .tab-close, .workspace-tab:focus-within .tab-close { opacity: 1; pointer-events: auto; }
+#page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header { padding: 12px 0; gap: 12px; }
+.composer-bottom { gap: 8px; flex-wrap: wrap; }
+.composer-bottom .connection { min-width: 0; max-width: 45%; }
+.workspace-save { font-size: 12px; color: var(--danger); }
+.workspace-save:has(#workspace-status[hidden]) { display: none; }
+.decision-overlay { position: fixed; inset: 0; background: #0006; z-index: 20; display: grid; place-items: center; }
+.decision-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; max-width: min(440px,90vw); }
+.decision-card button { margin-right: 12px; }
+.session-name[aria-current=page] { color: var(--accent); font-weight: 600; }

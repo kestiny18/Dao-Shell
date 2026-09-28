@@ -186,8 +186,8 @@ $('settings-form').addEventListener('submit', async (event) => {
     settingsView = await api.invoke('save_settings', { update:{ expected_revision:settingsView.revision, config, keys:[...pendingKeys.values()] } });
     pendingKeys.clear(); $('connection-key').value = '';
     applyAppearance(settingsView.config.appearance); renderConnections();
-    document.querySelectorAll('.message').forEach((node) => node.remove()); $('welcome').hidden = false; candidates([]); closeConfirmation();
-    await init(); settingsNotice('设置已保存。新配置已生效，已开始新会话。', false, 'save');
+    invalidateContexts();
+    await init(); settingsNotice('设置已保存。历史已保留，模型上下文和旧候选已失效。', false, 'save');
   } catch (error) { settingsNotice(String(error), true, 'save'); }
   finally { setBusy(false); }
 });

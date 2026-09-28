@@ -14,29 +14,64 @@ fn session_info(state: State<'_, Arc<Bridge>>) -> Result<serde_json::Value, Stri
 #[tauri::command]
 async fn perform(
     state: State<'_, Arc<Bridge>>,
+    session_id: String,
+    request_id: String,
     kind: String,
     input: String,
     on_event: Channel<serde_json::Value>,
 ) -> Result<dao_shell::session::Reply, String> {
     let bridge = state.inner().clone();
-    bridge.reserve()?;
-    tauri::async_runtime::spawn_blocking(move || bridge.execute(&kind, input, on_event))
-        .await
-        .map_err(|_| "桌面请求意外中断，请重启入口".to_string())?
+    bridge.reserve_for(&session_id, &request_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge.execute(&session_id, &request_id, &kind, input, on_event)
+    })
+    .await
+    .map_err(|_| "桌面请求意外中断，请重启入口".to_string())?
 }
 
 #[tauri::command]
 fn confirm_open(
     state: State<'_, Arc<Bridge>>,
+    session_id: String,
+    execution_id: String,
     request_id: String,
     approved: bool,
 ) -> Result<(), String> {
-    state.confirm(&request_id, approved)
+    state.confirm(&session_id, &execution_id, &request_id, approved)
 }
 
 #[tauri::command]
-fn cancel(state: State<'_, Arc<Bridge>>) {
-    state.cancel();
+fn cancel(
+    state: State<'_, Arc<Bridge>>,
+    session_id: Option<String>,
+    request_id: Option<String>,
+) -> Result<(), String> {
+    match (session_id, request_id) {
+        (Some(s), Some(r)) => state.cancel_for(&s, &r),
+        (None, None) => {
+            state.cancel();
+            Ok(())
+        }
+        _ => Err("请求标识缺失".into()),
+    }
+}
+
+#[tauri::command]
+fn load_workspace(
+    state: State<'_, Arc<Bridge>>,
+) -> Result<dao_shell::workspace::Workspace, String> {
+    state.load_workspace()
+}
+#[tauri::command]
+fn save_workspace(
+    state: State<'_, Arc<Bridge>>,
+    workspace: dao_shell::workspace::Workspace,
+) -> Result<(), String> {
+    state.save_workspace(workspace)
+}
+#[tauri::command]
+fn register_session(state: State<'_, Arc<Bridge>>, session_id: String) -> Result<(), String> {
+    state.register(session_id)
 }
 
 #[tauri::command]
@@ -72,11 +107,20 @@ async fn computer_overview(state: State<'_, Arc<Bridge>>) -> Result<serde_json::
         .map_err(|_| "概览读取中断".to_string())?
 }
 
+#[tauri::command]
+fn finish_close(window: tauri::Window) -> Result<(), String> {
+    window.destroy().map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(Arc::new(Bridge::new()))
         .invoke_handler(tauri::generate_handler![
+            finish_close,
             session_info,
+            load_workspace,
+            save_workspace,
+            register_session,
             perform,
             confirm_open,
             cancel,
@@ -86,11 +130,13 @@ fn main() {
             computer_overview
         ])
         .on_window_event(|window, event| {
-            if matches!(
-                event,
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed
-            ) {
-                use tauri::Manager;
+            use tauri::{Emitter, Manager};
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                window.state::<Arc<Bridge>>().cancel();
+                let _ = window.emit("workspace-close-requested", ());
+            }
+            if matches!(event, tauri::WindowEvent::Destroyed) {
                 window.state::<Arc<Bridge>>().cancel();
             }
         })

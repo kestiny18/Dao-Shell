@@ -6,14 +6,14 @@ function savePreference(key, value) {
   try { localStorage.setItem(key, value); } catch { /* A read-only profile still works. */ }
 }
 const divider = $('sidebar-resize');
-let sidebarWidth = Number(readPreference('dao.sidebarWidth', 205));
+let sidebarWidth = workspace.sidebar_width;
 function resizeSidebar(width, persist = false) {
   const maximum = Math.max(170, Math.min(360, window.innerWidth - 460));
   sidebarWidth = Math.round(Math.max(170, Math.min(maximum, Number.isFinite(width) ? width : 205)));
   document.querySelector('.shell').style.setProperty('--sidebar-width', `${sidebarWidth}px`);
   divider.setAttribute('aria-valuemax', String(maximum));
   divider.setAttribute('aria-valuenow', String(sidebarWidth));
-  if (persist) savePreference('dao.sidebarWidth', sidebarWidth);
+  if (persist) { workspace.sidebar_width = sidebarWidth; saveSoon(); }
 }
 let dragPointer = null;
 divider.addEventListener('pointerdown', (event) => {
@@ -26,7 +26,7 @@ divider.addEventListener('pointermove', (event) => {
 });
 function stopResize() {
   if (dragPointer === null) return;
-  dragPointer = null; document.body.classList.remove('resizing-sidebar'); savePreference('dao.sidebarWidth', sidebarWidth);
+  dragPointer = null; document.body.classList.remove('resizing-sidebar'); workspace.sidebar_width = sidebarWidth; saveSoon();
 }
 divider.addEventListener('pointerup', stopResize);
 divider.addEventListener('pointercancel', stopResize);
@@ -38,3 +38,5 @@ divider.addEventListener('keydown', (event) => {
 });
 window.addEventListener('resize', () => resizeSidebar(sidebarWidth));
 resizeSidebar(sidebarWidth);
+
+document.addEventListener('workspaceready',() => resizeSidebar(workspace.sidebar_width));

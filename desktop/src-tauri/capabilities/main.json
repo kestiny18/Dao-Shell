@@ -1,6 +1,22 @@
 {
   "identifier": "main-file-entry",
   "description": "Only the bundled main window may use the narrow file session adapter.",
-  "windows": ["main"],
-  "permissions": ["allow-session-info", "allow-perform", "allow-confirm-open", "allow-cancel", "allow-get-settings", "allow-save-settings", "allow-test-connection", "allow-computer-overview"]
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "allow-session-info",
+    "allow-perform",
+    "allow-confirm-open",
+    "allow-cancel",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-test-connection",
+    "allow-computer-overview",
+    "core:event:default",
+    "allow-load-workspace",
+    "allow-save-workspace",
+    "allow-register-session",
+    "allow-finish-close"
+  ]
 }

@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use sysinfo::{Networks, System};
 
+#[cfg(any(windows, test))]
+mod application_facts;
 #[cfg(windows)]
 mod icons;
 
@@ -94,6 +96,23 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
             .to_owned();
         (!text.trim().is_empty()).then_some(text)
     }
+    fn estimated_size(key: HKEY) -> Option<u64> {
+        let mut kib: u32 = 0;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let name = wide("EstimatedSize");
+        let result = unsafe {
+            RegGetValueW(
+                key,
+                std::ptr::null(),
+                name.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                (&mut kib as *mut u32).cast(),
+                &mut size,
+            )
+        };
+        (result == ERROR_SUCCESS).then_some(u64::from(kib) * 1024)
+    }
     let mut items = Vec::new();
     let mut icon_sources = std::collections::HashMap::new();
     let mut seen = BTreeSet::new();
@@ -152,7 +171,7 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
                         if let Some(source) = value(child.0, "DisplayIcon") {
                             icon_sources.insert(items.len(), source);
                         }
-                        items.push(json!({"name":name,"version":version,"publisher":publisher}));
+                        items.push(json!({"name":name,"version":version,"publisher":publisher,"estimated_size_bytes":estimated_size(child.0)}));
                     }
                 }
                 if index == 4095 {
@@ -179,8 +198,24 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
             }
         }
     }
-    items.sort_by_key(|item| item["name"].as_str().unwrap_or("").to_lowercase());
+    cancel.check()?;
+    let mut processes = System::new();
+    processes.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        true,
+        sysinfo::ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always),
+    );
+    let paths: Vec<_> = processes
+        .processes()
+        .values()
+        .filter_map(|p| p.exe())
+        .filter_map(|p| p.to_str())
+        .map(str::to_owned)
+        .collect();
+    let unreadable = processes.processes().len().saturating_sub(paths.len());
+    application_facts::annotate_running(&mut items, &icon_sources, &paths);
+    cancel.check()?;
     Ok(
-        json!({"items":items,"available":readable_views > 0,"partial":partial,"observed_at":now(),"limits":"仅枚举当前用户和本机 32/64 位卸载注册表记录；可能含组件，不完整覆盖商店应用或便携应用。"}),
+        json!({"items":items,"available":readable_views > 0,"partial":partial,"unreadable_process_paths":unreadable,"observed_at":now(),"limits":"安装占用为注册表登记估算值，不含完整磁盘扫描。运行中仅确认独占登记的可执行图标完整路径与可读进程路径一致；共享路径、缺少登记、无匹配或权限不足均为未知，不代表未运行。仅枚举当前用户和本机 32/64 位卸载注册表记录；可能含组件，不完整覆盖商店应用或便携应用。"}),
     )
 }

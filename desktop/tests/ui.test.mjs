@@ -86,6 +86,34 @@ test('home remains local, renders facts and treats application names as text', a
   assert.equal(f.calls.find((c)=>c.command==='perform').args.kind,'explain');
 });
 
+test('overview shows every application, stable running priority, estimates and unknowns in both views', async (t) => {
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  const snapshot=clone(f.w.eval('homeSnapshot'));
+  snapshot.applications.items=Array.from({length:125},(_,i)=>({name:`Fixture ${String(i).padStart(3,'0')}`,running:i===115 || i===120 ? true : null,estimated_size_bytes:i===115 ? 2048 : null}));
+  snapshot.applications.observed_at='2026-09-28T10:00:00Z';
+  snapshot.applications.unreadable_process_paths=3;
+  snapshot.network.adapters=[{name:'Ethernet',has_ip:true,received_bytes_per_second:1024,transmitted_bytes_per_second:0},{name:'WiFi',has_ip:false,received_bytes_per_second:0,transmitted_bytes_per_second:0}];
+  f.w.renderOverview(snapshot);
+  assert.equal(f.$('applications').children.length,125);
+  const rows=[...f.$('applications').children];
+  assert.match(rows[0].textContent,/Fixture 115.*运行中.*2.0 KiB/);
+  assert.match(rows[1].textContent,/Fixture 120.*运行中.*未知/);
+  assert.match(rows[2].textContent,/Fixture 000.*运行状态未知.*未知/);
+  assert.match(f.$('app-note').textContent,/3 个进程路径不可读/);
+  assert.match(f.$('app-note').textContent,/应用采样于/);
+  assert.equal(f.$('networks').querySelectorAll('.network-card').length,2);
+  f.w.document.querySelector('[data-app-view="list"]').click();
+  assert.equal(f.$('applications').children.length,125);
+  f.$('app-filter').value='Fixture 12';f.$('app-filter').dispatchEvent(new f.w.Event('input'));
+  assert.equal(f.$('applications').children.length,5);
+  assert.match(f.$('applications').firstChild.textContent,/Fixture 120/);
+  const style=f.w.document.createElement('style');style.textContent=await readFile(new URL('../ui/style.css',import.meta.url),'utf8');f.w.document.head.append(style);
+  const computed=f.w.getComputedStyle(f.$('applications'));
+  assert.ok(['','none'].includes(computed.maxHeight));
+  assert.ok(['','visible'].includes(computed.overflow));
+  assert.equal(f.w.getComputedStyle(f.$('networks')).display,'grid');
+});
+
 test('file names hide internal references, navigation preserves conversation, empty search clears candidates',async(t)=>{
   const f=await fixture();t.after(()=>f.dom.window.close());
   f.$('input').value='contract';f.submit('composer');await f.tick();

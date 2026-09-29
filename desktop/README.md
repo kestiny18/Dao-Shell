@@ -29,6 +29,14 @@ double-click restores the default. The computer overview offers cards or a list
 for registered apps, with local icons where available and initials otherwise.
 Sidebar width and app view are remembered on this device.
 
+Network interfaces always use cards. Registered applications use the page scroll
+and display all collected records (registry enumeration still has a safety bound).
+Installation sizes are registry `EstimatedSize` estimates; missing values are unknown,
+not zero, and no installation directory is scanned. Running badges require an exact
+match between a readable process executable path and a uniquely registered executable
+`DisplayIcon` path. Shared icon paths, directory-only registrations, protected processes
+and unmatched applications remain unknown, never “not running”. Confirmed applications
+appear first; the overview includes the application sample time and coverage limits.
 The existing green D/chevron mark is explicitly configured in `bundle.icon` as
 both PNG and Windows ICO, including the installer icon.
 

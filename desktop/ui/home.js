@@ -9,11 +9,12 @@ function humanBytes(value) {
 function textNode(tag, text, className) { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; }
 function renderApps() {
   const query = $('app-filter').value.trim().toLowerCase();
-  const matches = (homeSnapshot?.applications.items || []).filter((item) => item.name.toLowerCase().includes(query));
+  const matches = (homeSnapshot?.applications.items || []).filter((item) => item.name.toLowerCase().includes(query))
+    .sort((a, b) => Number(b.running === true) - Number(a.running === true));
   $('applications').replaceChildren();
   $('applications').dataset.view = appView;
   document.querySelectorAll('[data-app-view]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.appView === appView)));
-  for (const app of matches.slice(0, 100)) {
+  for (const app of matches) {
     const row = textNode('article', '', 'app-item');
     const initials = Array.from(app.name.trim()).slice(0, 2).join('').toUpperCase();
     const icon = textNode('div', initials, 'app-icon'); icon.setAttribute('aria-hidden', 'true');
@@ -24,10 +25,11 @@ function renderApps() {
     }
     const info = textNode('div', '', 'app-info');
     info.append(textNode('strong', app.name), textNode('small', [app.version, app.publisher].filter(Boolean).join(' · ') || '版本信息未登记'));
+    info.append(textNode('small', app.running === true ? '运行中' : '运行状态未知', app.running === true ? 'running-badge' : ''));
+    info.append(textNode('small', `估算安装占用：${app.estimated_size_bytes == null ? '未知' : humanBytes(app.estimated_size_bytes)}`));
     row.append(icon, info);
     $('applications').append(row);
   }
-  if (matches.length > 100) $('applications').append(textNode('p', `显示前 100 项，共匹配 ${matches.length} 项；请缩小筛选。`));
   if (!matches.length) $('applications').append(textNode('p', '当前范围内没有匹配的应用记录。'));
 }
 function renderOverview(snapshot) {
@@ -51,12 +53,12 @@ function renderOverview(snapshot) {
   $('networks').replaceChildren(); $('network-count').textContent = `· ${snapshot.network.adapters.length} 个`;
   $('network-note').textContent = snapshot.network.limits;
   for (const adapter of snapshot.network.adapters) {
-    const row = textNode('div', '', 'observation-row');
+    const row = textNode('article', '', 'network-card');
     row.append(textNode('strong', adapter.name), textNode('small', `${adapter.has_ip ? '已配置 IP' : '未观测到 IP'} · ↓ ${humanBytes(adapter.received_bytes_per_second)}/s · ↑ ${humanBytes(adapter.transmitted_bytes_per_second)}/s`));
     $('networks').append(row);
   }
   $('app-count').textContent = snapshot.applications.available ? `· ${snapshot.applications.items.length} 项记录` : '· 暂不可用';
-  $('app-note').textContent = snapshot.applications.limits + (snapshot.applications.partial ? ' 部分注册表位置读取失败或达到枚举上限。' : '');
+  $('app-note').textContent = snapshot.applications.limits + (snapshot.applications.observed_at ? ` 应用采样于 ${new Date(snapshot.applications.observed_at).toLocaleTimeString()}。` : '') + (snapshot.applications.unreadable_process_paths ? ` ${snapshot.applications.unreadable_process_paths} 个进程路径不可读，可能受系统权限限制。` : '') + (snapshot.applications.partial ? ' 部分注册表位置读取失败或达到枚举上限。' : '');
   renderApps(); $('explain-home').disabled = busy;
 }
 async function refreshOverview() {

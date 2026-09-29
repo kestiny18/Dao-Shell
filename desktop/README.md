@@ -50,8 +50,11 @@ also works with a configured system toolchain. It does not install dependencies
 or change your global PATH. There is no Node frontend build step.
 
 Try “找一下项目里的合同 PDF”, select a candidate, then confirm opening it.
-Natural language is the default. “文件名搜索” provides an explicit fallback
-without a model. Stop cancels the current request; New session creates an independent conversation. An opening receipt reports the OS handoff, not proof that the
+The input uses the configured model automatically. Without a model, or when its
+connection is unavailable before any tool call, it falls back once to local filename
+search using the original input. The notice explains that this literal search does
+not understand natural language. Cancellation, permission refusal, protocol/tool
+errors and failures after a tool call never trigger this fallback. Stop cancels the current request; New session creates an independent conversation. An opening receipt reports the OS handoff, not proof that the
 target application displayed the document.
 
 ## Workspace and local history

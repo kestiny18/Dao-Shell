@@ -394,3 +394,206 @@ fn tool_contract_accepts_path_terms_and_returns_current_numbered_candidates() {
     );
     assert!(runtime.last_results.is_empty());
 }
+
+fn file_session(
+    model: Option<ModelConfig>,
+    cancel: Cancellation,
+) -> (tempfile::TempDir, dao_shell::session::FileSession) {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("合同.txt"), "synthetic").unwrap();
+    let config = dao_shell::config::Config {
+        read_roots: vec![temp.path().to_owned()],
+        model,
+        ..Default::default()
+    };
+    let session = dao_shell::session::FileSession::new(&config, cancel).unwrap();
+    (temp, session)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_without_model_searches_literally_and_honors_cancellation() {
+    let cancel = Cancellation::default();
+    let (_temp, mut session) = file_session(None, cancel.clone());
+    let mut ui = Ui::default();
+    let reply = session
+        .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+        .await;
+    assert!(!reply.error);
+    assert_eq!(reply.items.len(), 1);
+    assert!(reply.message.contains("尚未配置模型"));
+    let reply = session
+        .execute(
+            dao_shell::session::Action::Say("找合同并打开".into()),
+            &mut ui,
+        )
+        .await;
+    assert!(!reply.error);
+    assert!(reply.items.is_empty());
+    assert_eq!(ui.confirmations, 0);
+    cancel.cancel();
+    let count = ui.results.len();
+    let reply = session
+        .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+        .await;
+    assert!(reply.error);
+    assert_eq!(ui.results.len(), count);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_only_falls_back_for_availability_statuses() {
+    for status in [429, 503, 401, 403, 400] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let model = config(listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            request(&mut stream);
+            write!(
+                stream,
+                "HTTP/1.1 {status} Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let (_temp, mut session) = file_session(Some(model), Cancellation::default());
+        let mut ui = Ui::default();
+        let reply = session
+            .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+            .await;
+        let fallback = status == 429 || status == 503;
+        assert_eq!(!reply.error, fallback);
+        assert_eq!(reply.items.len(), usize::from(fallback));
+        assert_eq!(ui.results.len(), usize::from(fallback));
+        assert_eq!(ui.confirmations, 0);
+        server.join().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_connection_failure_falls_back_once() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    drop(listener);
+    let (_temp, mut session) = file_session(Some(model), Cancellation::default());
+    let mut ui = Ui::default();
+    let reply = session
+        .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+        .await;
+    assert!(!reply.error);
+    assert_eq!(ui.results.len(), 1);
+    assert_eq!(reply.items.len(), 1);
+    assert!(reply.message.contains("当前模型不可用"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_tool_results_errors_and_refusals_never_replay() {
+    for kind in ["empty", "permission", "bad_arguments", "open_refused"] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let model = config(listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            request(&mut stream);
+            let args = match kind {
+                "empty" => json!({"query":"absent"}),
+                "permission" => json!({"query":"合同", "directory": std::env::temp_dir()}),
+                "bad_arguments" => json!({"query":123}),
+                _ => json!({"query":"合同"}),
+            };
+            respond(&mut stream, call("first", "file_search", args));
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = request(&mut stream);
+            if kind == "permission" || kind == "bad_arguments" {
+                let value: Value = serde_json::from_str(
+                    body["messages"].as_array().unwrap().last().unwrap()["content"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                assert!(value["error"].is_string());
+            }
+            if kind == "open_refused" {
+                let value: Value = serde_json::from_str(
+                    body["messages"].as_array().unwrap().last().unwrap()["content"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                respond(
+                    &mut stream,
+                    call(
+                        "open",
+                        "file_open",
+                        json!({"object_id":value["items"][0]["id"]}),
+                    ),
+                );
+                let (next, _) = listener.accept().unwrap();
+                stream = next;
+                request(&mut stream);
+            }
+            write!(
+                stream,
+                "HTTP/1.1 503 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let (_temp, mut session) = file_session(Some(model), Cancellation::default());
+        let mut ui = Ui::default();
+        let reply = session
+            .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+            .await;
+        assert!(reply.error, "{kind}");
+        assert!(!reply.message.contains("尝试用文件名"));
+        assert!(
+            ui.results
+                .iter()
+                .filter(|(name, _)| name == "file_search")
+                .count()
+                <= 1
+        );
+        if kind == "open_refused" {
+            assert_eq!(ui.confirmations, 1);
+        }
+        server.join().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_normal_answer_does_not_search() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request(&mut stream);
+        respond(&mut stream, json!({"content":"没有找到"}));
+    });
+    let (_temp, mut session) = file_session(Some(model), Cancellation::default());
+    let mut ui = Ui::default();
+    let reply = session
+        .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+        .await;
+    assert!(!reply.error);
+    assert_eq!(reply.message, "没有找到");
+    assert!(ui.results.is_empty());
+    server.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_entry_cancel_during_model_wait_does_not_fallback() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let cancel = Cancellation::default();
+    let server_cancel = cancel.clone();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request(&mut stream);
+        server_cancel.cancel();
+        thread::sleep(Duration::from_millis(150));
+    });
+    let (_temp, mut session) = file_session(Some(model), cancel);
+    let mut ui = Ui::default();
+    let reply = session
+        .execute(dao_shell::session::Action::Say("合同".into()), &mut ui)
+        .await;
+    assert!(reply.error);
+    assert!(reply.message.contains("取消"));
+    assert!(ui.results.is_empty());
+    server.join().unwrap();
+}

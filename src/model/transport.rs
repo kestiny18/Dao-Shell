@@ -15,6 +15,16 @@ use std::{collections::HashSet, time::Duration};
 
 pub(crate) const TOOL_LIMIT: usize = 12;
 
+/// A remote service availability failure, never a local permission or tool error.
+#[derive(Debug)]
+pub(crate) struct ModelUnavailable(pub String);
+impl std::fmt::Display for ModelUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for ModelUnavailable {}
+
 pub(crate) struct ModelClient {
     client: Client,
     endpoint: Url,
@@ -118,17 +128,28 @@ impl ModelClient {
         let network = async {
             // Never expose remote bodies, headers, or raw transport errors (which can contain secrets).
             let mut response = request.send().await.map_err(|e| {
-                anyhow::anyhow!(if e.is_timeout() {
-                    "模型请求超时；请检查网络或服务负载，已执行操作不会重试"
-                } else if e.is_connect() {
-                    "无法连接模型服务；请检查地址、端口、代理和服务是否启动"
-                } else if e.is_builder() {
-                    "无法构造模型请求；请检查密钥格式和本地配置"
-                } else {
-                    "模型连接失败；请检查网络与服务配置，已执行操作不会重试"
-                })
+                ModelUnavailable(
+                    (if e.is_timeout() {
+                        "模型请求超时；请检查网络或服务负载，已执行操作不会重试"
+                    } else if e.is_connect() {
+                        "无法连接模型服务；请检查地址、端口、代理和服务是否启动"
+                    } else if e.is_builder() {
+                        "无法构造模型请求；请检查密钥格式和本地配置"
+                    } else {
+                        "模型连接失败；请检查网络与服务配置，已执行操作不会重试"
+                    })
+                    .into(),
+                )
             })?;
             let status = response.status();
+            if status.as_u16() == 429 || status.is_server_error() {
+                return Err(ModelUnavailable(format!(
+                    "模型服务返回 HTTP {}：{}",
+                    status.as_u16(),
+                    status_hint(status.as_u16())
+                ))
+                .into());
+            }
             ensure!(
                 status.is_success(),
                 "模型服务返回 HTTP {}：{}",
@@ -139,7 +160,7 @@ impl ModelClient {
             while let Some(chunk) = response
                 .chunk()
                 .await
-                .map_err(|_| anyhow::anyhow!("模型响应读取失败；已执行操作不会重试"))?
+                .map_err(|_| ModelUnavailable("模型响应读取失败；已执行操作不会重试".into()))?
             {
                 ensure!(
                     body.len() + chunk.len() <= 512 * 1024,

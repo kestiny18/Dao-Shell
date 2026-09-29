@@ -166,7 +166,7 @@ function selectTab(id) {
 document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click',() => selectTab(b.dataset.page)));
 function setBusy(value) {
   busy = value;
-  $('send').disabled = value || !ready; $('mode').disabled = value || !ready; $('input').disabled = !ready;
+  $('send').disabled = value || !ready; $('input').disabled = !ready;
   $('reset').disabled = !ready;
   $('cancel').hidden = !value; $('settings-cancel').hidden = !value;
   document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home').forEach(n => {n.disabled = value;});
@@ -290,7 +290,7 @@ async function closeTab(id) {
   } catch (error) { persistenceNotice(String(error)); }
   finally { mutatingWorkspace = false; document.querySelector('.shell').inert = false; }
 }
-$('composer').addEventListener('submit',event => { event.preventDefault(); const input = $('input').value.trim(); if (input) run($('mode').value,input); });
+$('composer').addEventListener('submit',event => { event.preventDefault(); const input = $('input').value.trim(); if (input) run('say',input); });
 $('input').addEventListener('input',() => { captureDraft(); saveSoon(); });
 $('input').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('reset').addEventListener('click',newSession);

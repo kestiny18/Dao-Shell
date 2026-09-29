@@ -1,13 +1,21 @@
 use crate::{
     capabilities::{Interaction, Runtime, definitions},
     config::ModelConfig,
-    model::{ModelClient, TOOL_LIMIT},
+    model::{ModelClient, ModelUnavailable, TOOL_LIMIT},
 };
 use anyhow::{Result, bail, ensure};
 
 use serde_json::{Value, json};
 
 const CONTEXT_BYTES: usize = 128 * 1024;
+#[derive(Debug)]
+pub(crate) struct UnavailableBeforeTools(pub anyhow::Error);
+impl std::fmt::Display for UnavailableBeforeTools {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::error::Error for UnavailableBeforeTools {}
 pub struct Dialogue {
     client: ModelClient,
     messages: Vec<Value>,
@@ -102,7 +110,14 @@ impl Dialogue {
                     Value::Array(self.tools.clone()),
                     &runtime.cancel,
                 )
-                .await?;
+                .await
+                .map_err(|error| {
+                    if used == 0 && error.is::<ModelUnavailable>() {
+                        anyhow::Error::new(UnavailableBeforeTools(error))
+                    } else {
+                        error
+                    }
+                })?;
             self.messages.push(response.replay());
             if response.tool_calls.is_empty() {
                 return Ok(response

@@ -4,7 +4,7 @@ use crate::{
     capabilities::{Interaction, Runtime},
     config::Config,
     core::{Cancellation, FileObject},
-    dialogue::Dialogue,
+    dialogue::{Dialogue, UnavailableBeforeTools},
     files::Objects,
 };
 use anyhow::{Result, ensure};
@@ -60,7 +60,7 @@ impl FileSession {
             Some(Err(error)) => (None, Some(format!("{error:#}"))),
             None => (
                 None,
-                Some("尚未配置模型，请在设置 → 模型与连接中添加；也可以使用文件名搜索".into()),
+                Some("尚未配置模型，将按文件名搜索；可在设置 → 模型中添加".into()),
             ),
         };
         let info = SessionInfo {
@@ -120,25 +120,28 @@ impl FileSession {
             }
             Action::Say(input) => {
                 ensure!(!input.trim().is_empty(), "请输入你想找的文件");
-                let dialogue = self.dialogue.as_mut().ok_or_else(|| {
-                    anyhow::anyhow!(self.info.model_error.clone().unwrap_or_default())
-                })?;
-                dialogue.turn(&input, &mut self.runtime, ui).await
-            }
-            Action::Search(query) => {
-                ensure!(!query.trim().is_empty(), "请输入文件名关键词");
-                let result = self
-                    .runtime
-                    .call("file_search", json!({"query":query}), ui)?;
-                if let Some(dialogue) = &mut self.dialogue {
-                    dialogue.observe_local("file_search", &result);
-                }
-                Ok(if result["truncated"] == true {
-                    "本次扫描达到预算，结果并不完整；可缩小目录范围后重试。".into()
+                ensure!(input.len() <= 16 * 1024, "单次输入不超过 16KB");
+                let notice = if let Some(dialogue) = self.dialogue.as_mut() {
+                    match dialogue.turn(&input, &mut self.runtime, ui).await {
+                        Err(error) if error.is::<UnavailableBeforeTools>() => {
+                            dialogue.reset();
+                            format!("当前模型不可用：{error}。尝试用文件名搜索。")
+                        }
+                        result => return result,
+                    }
+                } else if self.info.model.is_some() {
+                    "当前模型不可用，请检查模型配置。尝试用文件名搜索。".into()
                 } else {
-                    format!("找到 {} 个候选。", self.runtime.last_results.len())
-                })
+                    "尚未配置模型，尝试用文件名搜索。".into()
+                };
+                self.runtime.cancel.check()?;
+                ui.progress(&notice);
+                let result = self.search(&input, ui)?;
+                Ok(format!(
+                    "{notice}\n按原输入匹配文件名，不理解自然语言；可改用简短文件名关键词。\n{result}"
+                ))
             }
+            Action::Search(query) => self.search(&query, ui),
             Action::Open(id) => {
                 ensure!(
                     self.runtime.last_results.contains(&id),
@@ -166,5 +169,20 @@ impl FileSession {
                 Ok("已开始新会话。".into())
             }
         }
+    }
+
+    fn search(&mut self, query: &str, ui: &mut dyn Interaction) -> Result<String> {
+        ensure!(!query.trim().is_empty(), "请输入文件名关键词");
+        let result = self
+            .runtime
+            .call("file_search", json!({"query":query}), ui)?;
+        if let Some(dialogue) = &mut self.dialogue {
+            dialogue.observe_local("file_search", &result);
+        }
+        Ok(if result["truncated"] == true {
+            "本次扫描达到预算，结果并不完整；可缩小目录范围后重试。".into()
+        } else {
+            format!("找到 {} 个候选。", self.runtime.last_results.len())
+        })
     }
 }

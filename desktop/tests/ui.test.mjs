@@ -434,3 +434,18 @@ test('failed settings save keeps the draft and candidates without applying appea
   f.change('appearance','dark');f.change('connection-models','draft-name');f.submit('settings-form');await f.tick();
   assert.match(f.$('settings-status').textContent,/settings disk full/);assert.equal(f.$('candidate-panel').hidden,false);assert.equal(f.$('connection-models').value,'draft-name');assert.equal(f.w.document.documentElement.dataset.theme,'light');
 });
+
+
+test('unified composer has no mode switch and keeps request ownership across tabs',async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  assert.equal(f.$('mode'),null);
+  f.$('input').value='slow';f.submit('composer');await f.tick();
+  const first=f.calls.find(c=>c.command==='perform');assert.equal(first.args.kind,'say');
+  f.$('reset').click();await f.tick();
+  f.events[0]({kind:'progress',text:'当前模型不可用，尝试用文件名搜索。'});
+  f.events[0]({kind:'result',capability:'file_search',value:{items:[file]}});
+  assert.equal(f.$('candidate-panel').hidden,true);
+  assert.notEqual(f.w.eval('workspace.active'),first.args.sessionId);
+  f.finishRequest();await f.tick();
+  assert.ok(f.saved().sessions.find(s=>s.id===first.args.sessionId).messages.some(m=>m.role==='receipt'));
+});

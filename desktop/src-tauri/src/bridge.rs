@@ -301,6 +301,67 @@ impl Interaction for DesktopInteraction<'_> {
 mod tests {
     use super::*;
     #[test]
+    fn saving_restricted_roots_invalidates_old_candidates_and_future_search_scope() {
+        let dir = std::env::temp_dir().join(format!("dao-p2-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("config.json");
+        Config {
+            read_roots: vec![dir.clone()],
+            ..Default::default()
+        }
+        .save(&path)
+        .unwrap();
+        std::fs::write(dir.join("synthetic.txt"), "fixture").unwrap();
+        let bridge = Bridge::with_path(path.clone());
+        let sid = uuid::Uuid::new_v4().to_string();
+        let rid = uuid::Uuid::new_v4().to_string();
+        bridge.register(sid.clone()).unwrap();
+        bridge.reserve_for(&sid, &rid).unwrap();
+        let found = bridge
+            .execute(
+                &sid,
+                &rid,
+                "search",
+                "synthetic.txt".into(),
+                Channel::new(|_| Ok(())),
+            )
+            .unwrap();
+        assert_eq!(found.items.len(), 1);
+        let view = bridge.settings().unwrap();
+        let mut config = view.config;
+        config.read_roots.clear();
+        bridge
+            .save(SettingsUpdate {
+                expected_revision: view.revision,
+                config,
+                keys: vec![],
+            })
+            .unwrap();
+        assert!(bridge.sessions.lock().unwrap().contexts.is_empty());
+        assert!(
+            Config::load(&path)
+                .unwrap()
+                .scope(false)
+                .unwrap()
+                .check(&dir, false)
+                .is_err()
+        );
+        bridge.reserve_for(&sid, &rid).unwrap();
+        let stale = bridge
+            .execute(
+                &sid,
+                &rid,
+                "open",
+                found.items[0].id.clone(),
+                Channel::new(|_| Ok(())),
+            )
+            .unwrap();
+        assert!(stale.error);
+        std::fs::remove_file(dir.join("synthetic.txt")).unwrap();
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
     fn configuration_save_cannot_race_a_turn_and_external_edits_drop_old_candidates() {
         let directory = std::env::temp_dir().join(format!("dao-bridge-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&directory).unwrap();

@@ -189,3 +189,5 @@ header { padding: 12px 0; gap: 12px; }
 .decision-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; max-width: min(440px,90vw); }
 .decision-card button { margin-right: 12px; }
 .session-name[aria-current=page] { color: var(--accent); font-weight: 600; }
+
+.directory-list{list-style:none;padding:0;display:grid;gap:8px}.directory-list li{display:flex;align-items:center;gap:12px;padding:8px 0}.directory-list span{flex:1;min-width:0;overflow-wrap:anywhere}.directory-list button{flex:none}

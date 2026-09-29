@@ -1,6 +1,6 @@
 /* Settings drafts contain keys only until save/reload; saved keys never come back. */
 let settingsView = null;
-let selectedConnection = null;
+let selectedModel = null;
 let pendingKeys = new Map();
 let settingsLoaded = false;
 // Small curated shortcuts, not a claim that the account has access to every model.
@@ -24,7 +24,7 @@ function renderProvider() {
   $('provider-help').textContent = preset ? `${preset.label} 官方地址已填好。选择模型并填入该服务的 API Key；实际可用模型取决于你的账号。` : '连接其他服务或本机模型：填写服务地址和模型名称。本机免密服务可不填 API Key。';
   $('model-preset').replaceChildren();
   for (const [value, label] of preset?.models || []) selectOption($('model-preset'), value, label);
-  selectOption($('model-preset'), 'custom', '其他模型 / 多个模型');
+  selectOption($('model-preset'), 'custom', '其他模型');
   const names = $('connection-models').value.trim();
   $('model-preset').value = preset?.models.some(([value]) => value === names) ? names : 'custom';
   $('custom-model-field').hidden = Boolean(preset) && $('model-preset').value !== 'custom';
@@ -44,58 +44,77 @@ function applyAppearance(value) { document.documentElement.dataset.theme = value
 function selectOption(select, value, label) {
   const option = document.createElement('option'); option.value = value; option.textContent = label; select.append(option);
 }
-function currentConnection() { return settingsView?.config.models.connections.find((c) => c.id === selectedConnection); }
-function storeConnection() {
-  const connection = currentConnection();
-  if (!connection) return;
-  // Custom services should not require the user to understand credential references.
-  if ($('connection-key').value.trim() && !$('connection-env').value.trim()) {
-    $('connection-env').value = `DAO_MODEL_${connection.id.replaceAll('-', '_')}`;
-  }
-  if (connection.endpoint !== $('connection-endpoint').value.trim() || connection.api_key_env !== $('connection-env').value.trim()) {
-    settingsView.credential_available = settingsView.credential_available.filter((id) => id !== connection.id);
-  }
-  connection.label = $('connection-label').value.trim();
-  connection.endpoint = $('connection-endpoint').value.trim();
-  connection.api_key_env = $('connection-env').value.trim();
+function currentModel() { return settingsView?.config.models.choices.find(m => m.id === selectedModel); }
+function currentConnection() { return settingsView?.config.models.connections.find(c => c.id === currentModel()?.connection_id); }
+function storeModel() {
+  const model = currentModel(); let connection = currentConnection();
+  if (!model || !connection) return;
   const catalog = settingsView.config.models;
-  const previous = catalog.choices.filter((m) => m.connection_id === connection.id);
-  const names = [...new Set($('connection-models').value.split('\n').map((x) => x.trim()).filter(Boolean))];
-  catalog.choices = catalog.choices.filter((m) => m.connection_id !== connection.id).concat(names.map((name) => ({ id:previous.find((m) => m.name === name)?.id || crypto.randomUUID(), connection_id:connection.id, name })));
+  const endpoint = $('connection-endpoint').value.trim();
+  let env = $('connection-env').value.trim();
   const key = $('connection-key').value;
-  if (key.trim()) pendingKeys.set(connection.id, { connection_id:connection.id, key, persist:$('persist-key').checked });
-  else pendingKeys.delete(connection.id);
+  const siblings = catalog.choices.some(m => m.id !== model.id && m.connection_id === connection.id);
+  const sharedCredential = catalog.choices.some(m => m.id !== model.id && catalog.connections.some(c => c.id === m.connection_id && c.endpoint === endpoint && c.api_key_env === env));
+  if (siblings && (endpoint !== connection.endpoint || env !== connection.api_key_env || key.trim())) {
+    connection = {...connection, id:crypto.randomUUID()};
+    catalog.connections.push(connection); model.connection_id = connection.id;
+  }
+  // Do not overwrite a sibling's endpoint-bound credential or copy saved secrets.
+  if (key.trim() && (!env || sharedCredential)) env = `DAO_MODEL_${(sharedCredential ? crypto.randomUUID() : connection.id).replaceAll('-', '_')}`;
+  if (connection.endpoint !== endpoint || connection.api_key_env !== env) settingsView.credential_available = settingsView.credential_available.filter(id => id !== connection.id);
+  connection.endpoint = endpoint; connection.api_key_env = env;
+  $('connection-env').value = env;
+  model.name = $('connection-models').value.trim();
+  if (key.trim()) pendingKeys.set(model.id, {connection_id:connection.id,key,persist:$('persist-key').checked});
+  else pendingKeys.delete(model.id);
 }
 function renderActiveModels() {
   const catalog = settingsView.config.models;
   $('active-model').replaceChildren(); selectOption($('active-model'), '', '暂不使用模型');
-  for (const model of catalog.choices) {
-    const connection = catalog.connections.find((c) => c.id === model.connection_id);
-    selectOption($('active-model'), model.id, `${connection?.label || '连接'} / ${model.name}`);
-  }
-  if (!catalog.choices.some((m) => m.id === catalog.active)) catalog.active = null;
+  for (const model of catalog.choices) selectOption($('active-model'), model.id, model.name || '未命名模型');
+  if (!catalog.choices.some(m => m.id === catalog.active)) catalog.active = null;
   $('active-model').value = catalog.active || '';
 }
-function renderConnections() {
-  $('connection-list').replaceChildren();
-  for (const connection of settingsView.config.models.connections) selectOption($('connection-list'), connection.id, connection.label || '未命名连接');
-  $('connection-list').value = selectedConnection || '';
-  const connection = currentConnection();
-  $('connection-fields').hidden = !connection;
-  $('remove-connection').disabled = !connection;
-  if (connection) {
-    $('connection-label').value = connection.label;
+function renderModels() {
+  $('model-list').replaceChildren();
+  for (const model of settingsView.config.models.choices) selectOption($('model-list'), model.id, model.name || '未命名模型');
+  $('model-list').value = selectedModel || '';
+  const model = currentModel(), connection = currentConnection();
+  $('model-fields').hidden = !model;
+  $('remove-model').disabled = !model;
+  if (model && connection) {
     $('connection-endpoint').value = connection.endpoint;
     $('connection-env').value = connection.api_key_env;
-    $('connection-models').value = settingsView.config.models.choices.filter((m) => m.connection_id === connection.id).map((m) => m.name).join('\n');
-    const key = pendingKeys.get(connection.id);
+    $('connection-models').value = model.name;
+    const key = pendingKeys.get(model.id);
     $('connection-key').value = key?.key || '';
     $('persist-key').checked = key?.persist ?? true;
-    $('credential-state').textContent = settingsView.credential_available.includes(connection.id) ? '已有可用凭据 · 留空保留' : '尚未设置 API Key · 本机免密服务可留空';
-    $('provider-preset').value = providerFor(connection.endpoint);
-    renderProvider();
+    $('credential-state').textContent = settingsView.credential_available.includes(connection.id) ? '已有可用凭据 · 留空保留' : '尚未设置 API Key · 本机免密模型可留空';
+    $('provider-preset').value = providerFor(connection.endpoint); renderProvider();
   }
   renderActiveModels();
+}
+function renderDirectories() {
+  for (const [id, field] of [['read-roots','read_roots'],['write-roots','write_roots']]) {
+    const list = $(id); list.replaceChildren();
+    settingsView.config[field].forEach((path,index) => {
+      const row = document.createElement('li'), label = document.createElement('span'), remove = document.createElement('button');
+      label.textContent = path; label.title = path; remove.type = 'button'; remove.textContent = '移除'; remove.setAttribute('aria-label', `移除目录：${path}`);
+      remove.addEventListener('click', () => { if (busy) return; settingsView.config[field].splice(index,1); renderDirectories(); });
+      row.append(label,remove); list.append(row);
+    });
+    if (!list.children.length) { const row = document.createElement('li'); row.textContent = '尚未添加目录'; list.append(row); }
+  }
+}
+function directoryKey(path) { return path.replaceAll('\\','/').replace(/\/+$/, '').toLowerCase(); }
+async function addDirectory(field) {
+  if (!api || busy || !settingsView) return;
+  setBusy(true);
+  try {
+    const path = await api.invoke('choose_directory');
+    if (path && !settingsView.config[field].some(p => directoryKey(p) === directoryKey(path))) { settingsView.config[field].push(path); renderDirectories(); settingsNotice('目录已添加，保存后生效。'); }
+  } catch (error) { settingsNotice(`无法选择目录：${error}`, true); }
+  finally { setBusy(false); }
 }
 function accessDescription() {
   $('access-description').textContent = $('access-mode').value === 'full'
@@ -106,55 +125,45 @@ async function loadSettings() {
   if (!api || busy) return;
   try {
     settingsView = await api.invoke('get_settings'); settingsLoaded = true;
-    pendingKeys.clear(); selectedConnection = settingsView.config.models.connections[0]?.id || null;
+    pendingKeys.clear(); selectedModel = settingsView.config.models.choices[0]?.id || null;
     $('access-mode').value = settingsView.config.access_mode;
-    $('read-roots').value = settingsView.config.read_roots.join('\n');
-    $('write-roots').value = settingsView.config.write_roots.join('\n');
+    renderDirectories();
     $('appearance').value = settingsView.config.appearance;
     applyAppearance(settingsView.config.appearance);
-    renderConnections(); accessDescription(); settingsNotice('');
+    renderModels(); accessDescription(); settingsNotice('');
   } catch (error) { settingsNotice(String(error), true); }
 }
-$('connection-list').addEventListener('change', () => { storeConnection(); selectedConnection = $('connection-list').value; renderConnections(); });
-$('add-connection').addEventListener('click', () => {
-  if (!settingsView) return;
-  storeConnection(); const id = crypto.randomUUID();
-  settingsView.config.models.connections.push({ id, label:'DeepSeek', endpoint:providerPresets.deepseek.endpoint, api_key_env:`DAO_MODEL_${id.replaceAll('-', '_')}` });
-  const modelId = crypto.randomUUID();
-  settingsView.config.models.choices.push({ id:modelId, connection_id:id, name:'deepseek-flash' });
-  if (!settingsView.config.models.active) settingsView.config.models.active = modelId;
-  selectedConnection = id; renderConnections(); settingsNotice('填写连接信息、测试连接，再保存。');
+$('model-list').addEventListener('change', () => { storeModel(); selectedModel = $('model-list').value; renderModels(); });
+$('add-model').addEventListener('click', () => {
+  if (!settingsView || busy) return;
+  storeModel(); const id = crypto.randomUUID(), modelId = crypto.randomUUID();
+  settingsView.config.models.connections.push({id,label:'模型配置',endpoint:providerPresets.deepseek.endpoint,api_key_env:`DAO_MODEL_${id.replaceAll('-', '_')}`});
+  settingsView.config.models.choices.push({id:modelId,connection_id:id,name:'deepseek-flash'});
+  selectedModel = modelId; renderModels(); settingsNotice('填写模型信息，测试后保存；默认模型可在上方选择。');
 });
-$('remove-connection').addEventListener('click', () => {
-  if (!settingsView) return;
-  const catalog = settingsView.config.models;
-  catalog.connections = catalog.connections.filter((c) => c.id !== selectedConnection);
-  catalog.choices = catalog.choices.filter((m) => m.connection_id !== selectedConnection);
-  pendingKeys.delete(selectedConnection); selectedConnection = catalog.connections[0]?.id || null;
-  renderConnections(); settingsNotice('连接将在保存后移除；系统中已有凭据不会被删除。');
+$('remove-model').addEventListener('click', () => {
+  if (!settingsView || busy) return;
+  const catalog = settingsView.config.models, connectionId = currentModel()?.connection_id;
+  catalog.choices = catalog.choices.filter(m => m.id !== selectedModel);
+  if (!catalog.choices.some(m => m.connection_id === connectionId)) catalog.connections = catalog.connections.filter(c => c.id !== connectionId);
+  pendingKeys.delete(selectedModel); selectedModel = catalog.choices[0]?.id || null;
+  renderModels(); settingsNotice('模型将在保存后移除；已保存的系统凭据不会被删除。');
 });
 $('provider-preset').addEventListener('change', () => {
+  if (!currentModel()) return;
   const preset = providerPresets[$('provider-preset').value];
-  const catalog = settingsView.config.models;
-  const wasActive = !catalog.active || catalog.choices.some((m) => m.id === catalog.active && m.connection_id === selectedConnection);
-  $('connection-label').value = preset?.label || '自定义服务';
   $('connection-endpoint').value = preset?.endpoint || '';
   $('connection-models').value = preset?.models[0][0] || '';
-  if (preset && !$('connection-env').value) $('connection-env').value = `DAO_MODEL_${selectedConnection.replaceAll('-', '_')}`;
-  if (!preset) $('connection-env').value = '';
-  $('connection-key').value = ''; pendingKeys.delete(selectedConnection);
-  storeConnection();
-  if (wasActive) catalog.active = catalog.choices.find((m) => m.connection_id === selectedConnection)?.id || null;
-  renderConnections();
-  settingsNotice('服务已切换，请填写对应的 API Key。更改只在保存后生效。');
+  $('connection-env').value = ''; $('connection-key').value = ''; pendingKeys.delete(selectedModel);
+  storeModel(); renderModels(); settingsNotice('提供方已切换，请填写对应模型信息。保存后生效。');
 });
 function updateModelChoices() {
-  const catalog = settingsView.config.models;
-  const wasActive = !catalog.active || catalog.choices.some((m) => m.id === catalog.active && m.connection_id === selectedConnection);
-  storeConnection();
-  if (wasActive && !catalog.choices.some((m) => m.id === catalog.active)) catalog.active = catalog.choices.find((m) => m.connection_id === selectedConnection)?.id || null;
-  renderActiveModels();
+  storeModel(); renderActiveModels();
+  const option = [...$('model-list').options].find(o => o.value === selectedModel);
+  if (option) option.textContent = currentModel()?.name || '未命名模型';
 }
+$('add-read-root').addEventListener('click', () => addDirectory('read_roots'));
+$('add-write-root').addEventListener('click', () => addDirectory('write_roots'));
 $('model-preset').addEventListener('change', () => {
   const custom = $('model-preset').value === 'custom';
   $('custom-model-field').hidden = !custom;
@@ -164,28 +173,26 @@ $('connection-models').addEventListener('change', updateModelChoices);
 $('active-model').addEventListener('change', () => { settingsView.config.models.active = $('active-model').value || null; });
 $('test-model').addEventListener('click', async () => {
   if (!api || busy || !settingsView) return;
-  storeConnection(); const connection = currentConnection();
-  const model = settingsView.config.models.choices.find((m) => m.connection_id === connection?.id);
+  storeModel(); const connection = currentConnection();
+  const model = currentModel();
   if (!model) { settingsNotice('请先填写模型名称。', true, 'test'); return; }
   setBusy(true); settingsNotice('正在验证连接与工具调用…', false, 'test');
   try {
-    const report = await api.invoke('test_connection', { request:{ model:{ endpoint:connection.endpoint, api_key_env:connection.api_key_env, model:model.name }, key:pendingKeys.get(connection.id)?.key || null } });
+    const report = await api.invoke('test_connection', { request:{ model:{ endpoint:connection.endpoint, api_key_env:connection.api_key_env, model:model.name }, key:pendingKeys.get(model.id)?.key || null } });
     settingsNotice(`连接与工具调用通过，${report.elapsed_ms} ms。尚未保存；修改任何连接信息后需要重新测试。`, false, 'test');
   } catch (error) { settingsNotice(String(error), true, 'test'); }
   finally { setBusy(false); }
 });
 $('settings-form').addEventListener('submit', async (event) => {
   event.preventDefault(); if (!api || busy || !settingsView) return;
-  storeConnection(); renderActiveModels();
+  storeModel(); renderActiveModels();
   const config = settingsView.config;
   config.access_mode = $('access-mode').value; config.appearance = $('appearance').value;
-  config.read_roots = $('read-roots').value.split('\n').map((x) => x.trim()).filter(Boolean);
-  config.write_roots = $('write-roots').value.split('\n').map((x) => x.trim()).filter(Boolean);
   setBusy(true);
   try {
     settingsView = await api.invoke('save_settings', { update:{ expected_revision:settingsView.revision, config, keys:[...pendingKeys.values()] } });
     pendingKeys.clear(); $('connection-key').value = '';
-    applyAppearance(settingsView.config.appearance); renderConnections();
+    applyAppearance(settingsView.config.appearance); renderModels();
     invalidateContexts();
     await init(); settingsNotice('设置已保存。历史已保留，模型上下文和旧候选已失效。', false, 'save');
   } catch (error) { settingsNotice(String(error), true, 'save'); }

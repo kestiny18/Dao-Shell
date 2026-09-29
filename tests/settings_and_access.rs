@@ -85,6 +85,17 @@ fn multiple_connections_keep_keys_out_of_views_and_configuration() {
     assert_eq!(saved.credential_available, vec!["second"]);
     assert!(!serde_json::to_string(&saved).unwrap().contains(secret));
     assert!(!fs::read_to_string(&path).unwrap().contains(secret));
+    let retained = settings::save(
+        &path,
+        SettingsUpdate {
+            expected_revision: saved.revision.clone(),
+            config: saved.config.clone(),
+            keys: vec![],
+        },
+    )
+    .unwrap();
+    assert_eq!(retained.credential_available, vec!["second"]);
+    assert!(!serde_json::to_string(&retained).unwrap().contains(secret));
     let mut invalid = saved.config.clone();
     invalid.models.choices[0].connection_id = "missing".into();
     let before = fs::read(&path).unwrap();

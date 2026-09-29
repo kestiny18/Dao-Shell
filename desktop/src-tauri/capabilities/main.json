@@ -17,6 +17,7 @@
     "allow-load-workspace",
     "allow-save-workspace",
     "allow-register-session",
-    "allow-finish-close"
+    "allow-finish-close",
+    "allow-choose-directory"
   ]
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bridge;
+mod directory;
 use bridge::Bridge;
 use dao_shell::settings::{ConnectionTest, SettingsUpdate, SettingsView};
 use std::sync::Arc;
@@ -108,6 +109,20 @@ async fn computer_overview(state: State<'_, Arc<Bridge>>) -> Result<serde_json::
 }
 
 #[tauri::command]
+async fn choose_directory(window: tauri::Window) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    let owner = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    #[cfg(not(windows))]
+    let owner = {
+        let _ = window;
+        0
+    };
+    tauri::async_runtime::spawn_blocking(move || directory::choose(owner))
+        .await
+        .map_err(|_| "目录选择中断".to_string())?
+}
+
+#[tauri::command]
 fn finish_close(window: tauri::Window) -> Result<(), String> {
     window.destroy().map_err(|e| e.to_string())
 }
@@ -117,6 +132,7 @@ fn main() {
         .manage(Arc::new(Bridge::new()))
         .invoke_handler(tauri::generate_handler![
             finish_close,
+            choose_directory,
             session_info,
             load_workspace,
             save_workspace,

@@ -20,7 +20,7 @@ To run from source, use PowerShell at the repository root:
 Open Settings at the bottom left → Models. Choose DeepSeek, OpenAI or Custom,
 select a model and enter its API key, then test and save. Official service addresses
 are filled automatically; Custom supports other compatible services and local models.
-Other model names and multiple models remain available. Existing CLI settings are
+The default model selector appears first. Each listed model can be edited, tested or removed independently; choose “暂不使用模型” to disable model use. Other model names and multiple models remain available. Existing shared connections are preserved internally. Editing one model splits its connection when necessary; entering a new key isolates its credential reference from other models. Leaving the key blank retains the current reference; changing the API address does not transfer saved credentials to the new address. Existing CLI settings are
 imported automatically. Saved changes apply between requests and reset all model execution contexts and
 file candidates; visible conversation history is retained.
 
@@ -36,10 +36,10 @@ Keys can remain in this desktop process or be saved in Windows Credential Manage
 A temporary key from another CLI process is not available here. Configured
 environment variables take precedence over stored credentials; newly entered keys
 take precedence in the current process. Saved credential values are never returned
-to the frontend. Removing a connection does not delete its OS credential entry.
+to the frontend. Removing a model does not delete its OS credential entry.
 
 Settings → Access offers restricted access to chosen directories or full access
-within the current OS user's authority. Full access does not elevate privileges,
+within the current OS user's authority. Read and CLI-write directories are lists: add using the native Windows folder picker and remove individual entries. Canceling the picker changes nothing; selected paths stay in the draft until Save. This does not scan the selected folders. Full access does not elevate privileges,
 skip confirmation or enable extra operations. Search starts in selected locations
 (Downloads, Documents and Desktop when none are selected), rather than scanning
 all disks. Specify a directory in natural language to search another location.

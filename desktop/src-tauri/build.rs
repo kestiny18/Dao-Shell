@@ -6,6 +6,7 @@ fn main() {
             "save_workspace",
             "register_session",
             "finish_close",
+            "choose_directory",
             "perform",
             "confirm_open",
             "cancel",

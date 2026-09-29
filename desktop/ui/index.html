@@ -33,24 +33,27 @@
         </section>
         <section id="page-settings" class="page" hidden>
           <div class="page-heading"><div><div class="eyebrow">按你的习惯使用</div><h1>设置</h1><p>连接模型，选择范围。你的设置由各入口共用。</p></div></div>
-          <div class="settings-tabs" role="group" aria-label="设置分类"><button data-settings="models" aria-pressed="true">模型与连接</button><button data-settings="access">访问权限</button><button data-settings="general">通用与外观</button></div>
+          <div class="settings-tabs" role="group" aria-label="设置分类"><button data-settings="models" aria-pressed="true">模型</button><button data-settings="access">访问权限</button><button data-settings="general">通用与外观</button></div>
           <div id="settings-status" role="status" class="notice" hidden></div>
           <form id="settings-form" class="settings-controls">
             <section id="settings-models">
-              <div class="setting-group"><h2>连接模型服务</h2><p>选择服务和模型，填入 API Key，再测试并保存。</p><div class="inline-fields"><label>已添加的服务<select id="connection-list"></select></label><button type="button" id="add-connection">＋ 添加服务</button><button type="button" id="remove-connection">移除服务</button></div>
-                <div id="connection-fields"><label>模型服务<select id="provider-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义</option></select></label>
+              <div class="setting-group"><h2>默认模型</h2><label>用于后续请求<select id="active-model"></select></label><p>保存后保留可见历史，重新开始模型上下文，旧候选失效。</p></div>
+              <div class="setting-group"><h2>我的模型</h2><div class="inline-fields"><label>已添加的模型<select id="model-list"></select></label><button type="button" id="add-model">＋ 添加模型</button><button type="button" id="remove-model">移除模型</button></div>
+                <div id="model-fields"><label>提供方<select id="provider-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义</option></select></label>
                 <p id="provider-help"></p>
-                <label id="endpoint-field">服务地址 <small>填写完整的 Chat Completions 地址；本机模型也可在这里连接。</small><input id="connection-endpoint" maxlength="4096" placeholder="https://…/v1/chat/completions"></label>
+                <label id="endpoint-field">API 地址 <small>完整的 Chat Completions 地址</small><input id="connection-endpoint" maxlength="4096" placeholder="https://…/v1/chat/completions"></label>
                 <label id="model-choice-field">模型<select id="model-preset"></select></label>
-                <label id="custom-model-field">模型名称 <small>填写服务提供的模型 ID，每行一个。</small><textarea id="connection-models" rows="2" placeholder="填写模型名称"></textarea></label>
+                <label id="custom-model-field">模型名称 <small>提供方的模型 ID</small><input id="connection-models" maxlength="256" placeholder="填写模型名称"></label>
                 <label>API Key <small id="credential-state">尚未设置</small><input id="connection-key" type="password" autocomplete="off" placeholder="留空保留已有密钥"></label>
                 <label class="check-row"><input id="persist-key" type="checkbox" checked>保存到 Windows 凭据管理器</label>
-                <details><summary>更多设置</summary><label>服务备注<input id="connection-label" maxlength="120" placeholder="例如：我的 DeepSeek"></label><label>密钥环境变量<input id="connection-env" maxlength="128"></label><p>已有环境变量优先于系统保存的密钥。新输入的密钥在本次进程内优先使用；本机免密服务可留空。</p></details>
-                <div class="inline-fields"><button type="button" id="test-model">测试此连接的第一个模型</button><small>使用虚构样例，最多两次请求，可能产生费用；不发送本机文件。</small></div></div>
+                <details><summary>更多设置</summary><label>密钥环境变量<input id="connection-env" maxlength="128"></label><p>已有环境变量优先于系统保存的密钥。新输入密钥只更新此模型；本机免密模型可留空。</p></details>
+                <div class="inline-fields"><button type="button" id="test-model">测试此模型</button><small>使用虚构样例，最多两次请求，可能产生费用；不发送本机文件。</small></div></div>
               </div>
-              <div class="setting-group"><h2>默认模型</h2><label>用于新会话<select id="active-model"></select></label><p>保存配置与通过连接测试是两回事。保存后保留可见历史，重新开始模型上下文，旧候选失效。</p></div>
             </section>
-            <section id="settings-access" hidden><div class="setting-group"><h2>访问模式</h2><label>文件访问<select id="access-mode"><option value="restricted">安全模式 · 仅指定目录</option><option value="full">完全访问 · 当前系统用户可访问的位置</option></select></label><p id="access-description"></p><label>查找目录 <small>每行一个完整目录路径</small><textarea id="read-roots" rows="4" placeholder="E:\工作资料"></textarea></label><label>CLI 可写目录 <small>安全模式下有效，每行一个</small><textarea id="write-roots" rows="3"></textarea></label><p>完全访问不提升系统权限，也不跳过确认。桌面当前只提供查找、元数据与确认打开；移动仍通过 CLI 执行并记录。新模式不自动开放删除或覆盖。</p></div></section>
+            <section id="settings-access" hidden><div class="setting-group"><h2>访问模式</h2><label>文件访问<select id="access-mode"><option value="restricted">安全模式 · 仅指定目录</option><option value="full">完全访问 · 当前系统用户可访问的位置</option></select></label><p id="access-description"></p>
+              <h3>查找目录</h3><ul id="read-roots" class="directory-list" aria-label="查找目录"></ul><button type="button" id="add-read-root">＋ 选择查找目录</button>
+              <h3>CLI 可写目录</h3><ul id="write-roots" class="directory-list" aria-label="CLI 可写目录"></ul><button type="button" id="add-write-root">＋ 选择可写目录</button>
+              <p>目录选择只修改草稿，保存后生效。完全访问不提升系统权限，也不跳过确认。桌面当前只提供查找、元数据与确认打开；移动仍通过 CLI 执行并记录。新模式不自动开放删除或覆盖。</p></div></section>
             <section id="settings-general" hidden><div class="setting-group"><h2>外观</h2><label>主题<select id="appearance"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label><p>界面语言：简体中文。设置页切换不会丢失当前对话。</p></div></section>
             <div class="settings-save"><button type="button" id="reload-settings">放弃修改并重新载入</button><button class="primary" type="submit" id="save-settings">保存设置</button></div>
           </form>

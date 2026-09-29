@@ -18,6 +18,7 @@
     "allow-save-workspace",
     "allow-register-session",
     "allow-finish-close",
-    "allow-choose-directory"
+    "allow-choose-directory",
+    "allow-application-action"
   ]
 }

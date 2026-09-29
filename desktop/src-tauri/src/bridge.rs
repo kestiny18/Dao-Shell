@@ -22,6 +22,7 @@ pub struct Bridge {
     workspace: Mutex<WorkspaceStore>,
     pub control: RequestControl,
     overview: Mutex<Option<Value>>,
+    applications: Mutex<crate::app_actions::Catalog>,
 }
 #[derive(Default)]
 struct Sessions {
@@ -60,6 +61,7 @@ impl Bridge {
             active: Mutex::new(None),
             control: RequestControl::default(),
             overview: Mutex::new(None),
+            applications: Mutex::new(crate::app_actions::Catalog::default()),
         }
     }
     fn path(&self) -> PathBuf {
@@ -113,10 +115,24 @@ impl Bridge {
     pub fn overview(&self) -> Result<Value, String> {
         self.reserve()?;
         let _release = Release(self);
-        let snapshot =
+        // Invalidate earlier action references even when the next sampling fails.
+        *self.applications.lock().map_err(error)? = crate::app_actions::Catalog::default();
+        let mut snapshot =
             dao_shell::computer::overview(&self.control.cancellation()).map_err(error)?;
+        self.applications
+            .lock()
+            .map_err(error)?
+            .refresh(&mut snapshot);
         *self.overview.lock().map_err(|_| "概览不可用".to_string())? = Some(snapshot.clone());
         Ok(snapshot)
+    }
+    pub fn application_action(&self, id: &str, action: &str) -> Result<Value, String> {
+        self.reserve()?;
+        let _release = Release(self);
+        self.applications
+            .lock()
+            .map_err(error)?
+            .execute(id, action, &self.control.cancellation())
     }
     pub fn test(&self, request: ConnectionTest) -> Result<Value, String> {
         self.reserve()?;
@@ -300,6 +316,27 @@ impl Interaction for DesktopInteraction<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn application_actions_share_request_reservation_and_release_after_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_path(dir.path().join("config.json"));
+        bridge.reserve().unwrap();
+        assert!(
+            bridge
+                .application_action("unknown", "uninstall")
+                .unwrap_err()
+                .contains("请求")
+        );
+        drop(Release(&bridge));
+        assert!(
+            bridge
+                .application_action("unknown", "uninstall")
+                .unwrap_err()
+                .contains("失效")
+        );
+        bridge.reserve().unwrap();
+        drop(Release(&bridge));
+    }
     #[test]
     fn saving_restricted_roots_invalidates_old_candidates_and_future_search_scope() {
         let dir = std::env::temp_dir().join(format!("dao-p2-{}", uuid::Uuid::new_v4()));

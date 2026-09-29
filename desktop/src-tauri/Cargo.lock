@@ -617,6 +617,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
  "uuid",
  "windows 0.61.3",

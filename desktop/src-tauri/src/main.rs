@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_actions;
 mod bridge;
 mod directory;
 use bridge::Bridge;
@@ -109,6 +110,17 @@ async fn computer_overview(state: State<'_, Arc<Bridge>>) -> Result<serde_json::
 }
 
 #[tauri::command]
+async fn application_action(
+    state: State<'_, Arc<Bridge>>,
+    app_id: String,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.application_action(&app_id, &action))
+        .await
+        .map_err(|_| "应用操作中断".to_string())?
+}
+#[tauri::command]
 async fn choose_directory(window: tauri::Window) -> Result<Option<String>, String> {
     #[cfg(windows)]
     let owner = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
@@ -143,7 +155,8 @@ fn main() {
             get_settings,
             save_settings,
             test_connection,
-            computer_overview
+            computer_overview,
+            application_action
         ])
         .on_window_event(|window, event| {
             use tauri::{Emitter, Manager};

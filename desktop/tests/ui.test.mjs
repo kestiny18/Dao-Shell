@@ -26,6 +26,7 @@ async function fixture(options = {}) {
     if (command === 'choose_directory') { if(options.directoryError) throw Error('picker unavailable'); return options.directory ?? null; }
     if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return clone(current); }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
+    if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
     if (command === 'computer_overview') return {system:{cpu_percent:12.5,memory_used_bytes:1024,memory_total_bytes:2048,memory_available_bytes:1024,disks:[{mount:'C:\\',total_bytes:4096,available_bytes:2048}]},device:{host:'Fixture computer',os:'Fixture OS',uptime_seconds:3600,architecture:'x86_64'},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:'Fixture counters'},applications:{items:[{name:'<img src=x onerror=alert(1)>',version:'1'}],available:true,partial:true,limits:'Partial fixture'}};
     if (command === 'perform') {
       const emit = event => args.onEvent.onmessage({...event,session_id:args.sessionId,execution_id:args.requestId}); events.push(emit);
@@ -476,4 +477,38 @@ test('unified composer has no mode switch and keeps request ownership across tab
   assert.notEqual(f.w.eval('workspace.active'),first.args.sessionId);
   f.finishRequest();await f.tick();
   assert.ok(f.saved().sessions.find(s=>s.id===first.args.sessionId).messages.some(m=>m.role==='receipt'));
+});
+
+test('application double click and keyboard menu use bound id, while busy suppresses repeats', async (t) => {
+  let resolve; const f=await fixture({appAction:()=>new Promise(r=>{resolve=r;})});t.after(()=>f.dom.window.close());
+  const snapshot=clone(f.w.eval('homeSnapshot'));snapshot.applications.items=[{name:'Fixture app',action_id:'bound-id',action_reason:''}];f.w.renderOverview(snapshot);
+  const row=f.$('applications').firstElementChild;
+  row.dispatchEvent(new f.w.MouseEvent('dblclick',{bubbles:true}));row.dispatchEvent(new f.w.MouseEvent('dblclick',{bubbles:true}));
+  assert.deepEqual(f.calls.filter(c=>c.command==='application_action').map(c=>c.args),[{appId:'bound-id',action:'run'}]);
+  assert.equal(f.$('refresh-home').disabled,true);resolve({status:'cancelled',message:'操作已取消'});await f.tick();assert.match(f.$('activity').textContent,/已取消/);
+  row.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true}));
+  let menu=f.w.document.querySelector('[role=menu]');assert.equal(menu.children.length,4);assert.equal(f.w.document.activeElement,menu.children[0]);
+  menu.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));assert.equal(f.w.document.activeElement,menu.children[1]);
+  menu.children[0].click();assert.deepEqual(f.calls.filter(c=>c.command==='application_action').at(-1).args,{appId:'bound-id',action:'run'});
+  resolve({status:'handed_off',message:'已交给 Windows'});await f.tick();
+  row.dispatchEvent(new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));menu=f.w.document.querySelector('[role=menu]');
+  menu.dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));assert.equal(f.w.document.querySelector('[role=menu]'),null);assert.equal(f.w.document.activeElement,row);
+});
+
+test('unavailable app actions give reasons and only fixed uninstall action remains available', async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());const snapshot=clone(f.w.eval('homeSnapshot'));
+  snapshot.applications.items=[{name:'<unsafe>',action_id:'bound',action_reason:'没有可靠目标'}];f.w.renderOverview(snapshot);
+  const row=f.$('applications').firstElementChild;row.dispatchEvent(new f.w.MouseEvent('dblclick',{bubbles:true}));await f.tick();assert.match(f.$('activity').textContent,/没有可靠目标/);
+  row.dispatchEvent(new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));const buttons=[...f.w.document.querySelectorAll('[role=menuitem]')];
+  for(const button of buttons.slice(0,3)){assert.equal(button.getAttribute('aria-disabled'),'true');assert.match(button.textContent,/没有可靠目标/);button.click();}
+  assert.equal(f.calls.filter(c=>c.command==='application_action').length,0);buttons[3].click();await f.tick();assert.deepEqual(f.calls.filter(c=>c.command==='application_action').at(-1).args,{appId:'bound',action:'uninstall'});
+});
+
+test('application failure restores controls and menu routes admin and location explicitly',async(t)=>{
+  const f=await fixture({appAction:()=>{throw Error('目标已变化');}});t.after(()=>f.dom.window.close());const snapshot=clone(f.w.eval('homeSnapshot'));
+  snapshot.applications.items=[{name:'Fixture',action_id:'bound',action_reason:''}];f.w.renderOverview(snapshot);const row=f.$('applications').firstElementChild;
+  for(const [index,action] of [[1,'admin'],[2,'location']]){
+    row.dispatchEvent(new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));f.w.document.querySelectorAll('[role=menuitem]')[index].click();await f.tick();
+    assert.deepEqual(f.calls.filter(c=>c.command==='application_action').at(-1).args,{appId:'bound',action});assert.match(f.$('activity').textContent,/目标已变化/);assert.equal(f.$('refresh-home').disabled,false);
+  }
 });

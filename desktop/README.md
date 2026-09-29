@@ -37,6 +37,20 @@ match between a readable process executable path and a uniquely registered execu
 `DisplayIcon` path. Shared icon paths, directory-only registrations, protected processes
 and unmatched applications remain unknown, never “not running”. Confirmed applications
 appear first; the overview includes the application sample time and coverage limits.
+Double-click an application to run it, or right-click / press Shift+F10 for Run,
+Run as administrator, Open file location and Uninstall. Uninstall only opens the
+fixed Windows installed-apps settings page; no registry uninstall command is run.
+Launching is conservative: a unique, exactly named Start-menu shortcut must point
+to a local fixed-drive EXE without arguments or a custom working directory. Ambiguous,
+missing, network, reparse-point, installer/maintenance and command-interpreter targets
+are unavailable with an explanation. Store and portable applications are not fully
+covered. DisplayIcon is never treated as a launch instruction. Enumeration is bounded
+to 4,096 entries and eight nested directories. Execution rechecks and pins the shortcut
+and target identity; refresh invalidates old action references. Administrator execution
+uses Windows UAC; cancellation is reported as cancellation. A handoff receipt does
+not prove that the application started. These actions share the global request lock
+and are available only through explicit UI actions, never model tools.
+
 The existing green D/chevron mark is explicitly configured in `bundle.icon` as
 both PNG and Windows ICO, including the installer icon.
 

@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const api = window.__TAURI__?.core;
 let busy = false;
+let applicationBusy = false;
 let currentPage = 'home';
 let renderedTab = 'home';
 let workspace = {version:1,sessions:[],tabs:['home'],active:'home',sidebar_width:205,collapsed:false,home_draft:''};
@@ -168,7 +169,7 @@ function setBusy(value) {
   busy = value;
   $('send').disabled = value || !ready; $('input').disabled = !ready;
   $('reset').disabled = !ready;
-  $('cancel').hidden = !value; $('settings-cancel').hidden = !value;
+  $('cancel').hidden = !value || applicationBusy; $('settings-cancel').hidden = !value || applicationBusy;
   document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home').forEach(n => {n.disabled = value;});
   document.querySelectorAll('.file-row button').forEach(n => {n.disabled = value;});
 }

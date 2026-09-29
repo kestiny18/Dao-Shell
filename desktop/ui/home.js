@@ -1,4 +1,42 @@
 let homeSnapshot = null;
+let appMenu = null;
+function closeAppMenu() { appMenu?.remove(); appMenu = null; }
+async function applicationAction(app, action) {
+  closeAppMenu();
+  if (!api || busy || !app.action_id) return;
+  if (action !== 'uninstall' && app.action_reason) { $('activity').textContent = app.action_reason; return; }
+  applicationBusy = true; setBusy(true); $('activity').textContent = action === 'admin' ? '等待 Windows 管理员确认…' : '正在请求 Windows…';
+  try { const reply = await api.invoke('application_action', {appId:app.action_id, action}); $('activity').textContent = reply.message; }
+  catch (error) { $('activity').textContent = String(error); }
+  finally { applicationBusy = false; setBusy(false); }
+}
+function showAppMenu(app, row, event) {
+  event.preventDefault(); closeAppMenu();
+  const menu = textNode('div', '', 'app-context-menu'); appMenu = menu;
+  menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', `${app.name}的操作`);
+  for (const [action, label] of [['run','运行'],['admin','以管理员身份运行'],['location','打开文件位置'],['uninstall','卸载（打开系统设置）']]) {
+    const button = textNode('button', label); button.type = 'button'; button.setAttribute('role','menuitem');
+    const reason = busy ? '请等待当前操作完成' : !app.action_id ? '请刷新概览以获取操作入口' : action !== 'uninstall' ? app.action_reason : '';
+    button.setAttribute('aria-disabled', String(Boolean(reason)));
+    if (reason) { button.title = reason; button.append(textNode('small', reason)); }
+    button.addEventListener('click', () => { if (!reason) applicationAction(app, action); });
+    menu.append(button);
+  }
+  document.body.append(menu);
+  const rect = row.getBoundingClientRect();
+  menu.style.left = `${Math.max(0, Math.min(event.clientX || rect.left, window.innerWidth - menu.offsetWidth))}px`;
+  menu.style.top = `${Math.max(0, Math.min(event.clientY || rect.bottom, window.innerHeight - menu.offsetHeight))}px`;
+  menu.firstElementChild.focus();
+  menu.addEventListener('keydown', e => {
+    const buttons = [...menu.querySelectorAll('button')]; const i = buttons.indexOf(document.activeElement);
+    if (e.key === 'Escape' || e.key === 'Tab') { closeAppMenu(); row.focus(); if (e.key === 'Escape') e.preventDefault(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); buttons[(i + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus(); }
+  });
+}
+document.addEventListener('pointerdown', e => { if (appMenu && !appMenu.contains(e.target)) closeAppMenu(); });
+window.addEventListener('resize', closeAppMenu);
+document.addEventListener('pagechange', closeAppMenu);
+document.addEventListener('scroll', closeAppMenu, true);
 let appView = readPreference('dao.appView', 'cards') === 'list' ? 'list' : 'cards';
 function humanBytes(value) {
   if (value == null || !Number.isFinite(value)) return '暂不可用';
@@ -8,6 +46,7 @@ function humanBytes(value) {
 }
 function textNode(tag, text, className) { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; }
 function renderApps() {
+  closeAppMenu();
   const query = $('app-filter').value.trim().toLowerCase();
   const matches = (homeSnapshot?.applications.items || []).filter((item) => item.name.toLowerCase().includes(query))
     .sort((a, b) => Number(b.running === true) - Number(a.running === true));
@@ -16,6 +55,10 @@ function renderApps() {
   document.querySelectorAll('[data-app-view]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.appView === appView)));
   for (const app of matches) {
     const row = textNode('article', '', 'app-item');
+    row.tabIndex = 0; row.setAttribute('aria-label', `${app.name}，右键或 Shift+F10 查看操作`);
+    row.addEventListener('dblclick', () => applicationAction(app, 'run'));
+    row.addEventListener('contextmenu', e => showAppMenu(app, row, e));
+    row.addEventListener('keydown', e => { if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) showAppMenu(app, row, e); });
     const initials = Array.from(app.name.trim()).slice(0, 2).join('').toUpperCase();
     const icon = textNode('div', initials, 'app-icon'); icon.setAttribute('aria-hidden', 'true');
     if (typeof app.icon === 'string' && app.icon.length < 24000 && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(app.icon)) {
@@ -63,6 +106,7 @@ function renderOverview(snapshot) {
 }
 async function refreshOverview() {
   if (!api || busy) return;
+  closeAppMenu();
   setBusy(true); $('activity').textContent = '正在读取本机概览…';
   try { renderOverview(await api.invoke('computer_overview')); $('activity').textContent = '本机概览已更新'; }
   catch (error) { $('activity').textContent = String(error); $('device-summary').textContent = homeSnapshot ? '刷新失败，下面保留上一次采样。' : '本次概览暂不可用，请稍后刷新。'; }

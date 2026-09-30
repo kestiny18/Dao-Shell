@@ -1,4 +1,20 @@
 let homeSnapshot = null;
+let processSort = 'cpu';
+function resourcePercent(value) { return value == null || !Number.isFinite(value) ? '未知' : value > 0 && value < 0.1 ? '<0.1%' : `${value.toFixed(1)}%`; }
+function renderProcesses() {
+  const snapshot = homeSnapshot;
+  const processes = snapshot?.process_rankings?.[processSort] || [];
+  $('resource-processes').replaceChildren();
+  document.querySelectorAll('[data-process-sort]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.processSort === processSort)));
+  for (const process of processes) {
+    const row = textNode('tr', '');
+    row.append(textNode('td', `${process.name || '未知名称'} / ${process.pid}`), textNode('td', resourcePercent(process.cpu_percent_total)), textNode('td', process.memory_bytes == null ? '未知' : humanBytes(process.memory_bytes)));
+    $('resource-processes').append(row);
+  }
+  $('resource-empty').hidden = processes.length > 0;
+  $('resource-sample').textContent = snapshot ? `采样时间：${new Date(snapshot.observed_at).toLocaleString()} · CPU 计数窗口：${Number.isFinite(snapshot.cpu_interval_ms) ? (snapshot.cpu_interval_ms / 1000).toFixed(2) + ' 秒' : '未知'} · 仅手动刷新，不记录趋势。` : '等待采样';
+  $('resource-coverage').textContent = `本次枚举 ${snapshot?.matched_processes ?? '未知数量'} 个进程，显示${processSort === 'cpu' ? ' CPU' : '内存'}占用前 ${processes.length} 项。${snapshot?.disappeared_processes ?? '未知数量'} 个进程在两次观测间消失或身份变化，未列入；新出现或无法读取的进程可能缺少 CPU 数据。排序仅比较本次可读值，未知排在末尾。`;
+}
 let appMenu = null;
 function closeAppMenu() { appMenu?.remove(); appMenu = null; }
 async function applicationAction(app, action) {
@@ -102,7 +118,7 @@ function renderOverview(snapshot) {
   }
   $('app-count').textContent = snapshot.applications.available ? `· ${snapshot.applications.items.length} 项记录` : '· 暂不可用';
   $('app-note').textContent = snapshot.applications.limits + (snapshot.applications.observed_at ? ` 应用采样于 ${new Date(snapshot.applications.observed_at).toLocaleTimeString()}。` : '') + (snapshot.applications.unreadable_process_paths ? ` ${snapshot.applications.unreadable_process_paths} 个进程路径不可读，可能受系统权限限制。` : '') + (snapshot.applications.partial ? ' 部分注册表位置读取失败或达到枚举上限。' : '');
-  renderApps(); $('explain-home').disabled = busy;
+  renderProcesses(); renderApps(); $('explain-home').disabled = busy;
 }
 async function refreshOverview() {
   if (!api || busy) return;
@@ -113,6 +129,7 @@ async function refreshOverview() {
   finally { setBusy(false); $('explain-home').disabled = !homeSnapshot; }
 }
 $('refresh-home').addEventListener('click', refreshOverview);
+document.querySelectorAll('[data-process-sort]').forEach(button => button.addEventListener('click', () => { processSort = button.dataset.processSort; renderProcesses(); }));
 $('app-filter').addEventListener('input', renderApps);
 document.querySelectorAll('[data-app-view]').forEach((button) => button.addEventListener('click', () => {
   appView = button.dataset.appView; savePreference('dao.appView', appView); renderApps();

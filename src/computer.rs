@@ -17,15 +17,7 @@ pub fn overview(cancel: &Cancellation) -> Result<Value> {
     cancel.check()?;
     let mut networks = Networks::new_with_refreshed_list();
     let started = Instant::now();
-    let mut facts = resources::snapshot(
-        &resources::Request {
-            sample_ms: Some(700),
-            limit: Some(5),
-            ..Default::default()
-        },
-        cancel,
-        false,
-    )?;
+    let mut facts = resources::overview_snapshot(cancel)?;
     networks.refresh(true);
     let elapsed = started.elapsed().as_secs_f64();
     let adapters: Vec<_> = networks

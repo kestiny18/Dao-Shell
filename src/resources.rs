@@ -22,7 +22,7 @@ pub enum ProcessSort {
     Memory,
     Cpu,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Process {
     pub pid: u32,
     pub started_at_unix: Option<u64>,
@@ -36,6 +36,29 @@ pub fn snapshot(
     request: &Request,
     cancel: &Cancellation,
     processes_only: bool,
+) -> Result<serde_json::Value> {
+    collect(request, cancel, processes_only, false)
+}
+
+/// Both rankings use the same observations, before either list is truncated.
+pub fn overview_snapshot(cancel: &Cancellation) -> Result<serde_json::Value> {
+    collect(
+        &Request {
+            sample_ms: Some(700),
+            limit: Some(10),
+            ..Default::default()
+        },
+        cancel,
+        false,
+        true,
+    )
+}
+
+fn collect(
+    request: &Request,
+    cancel: &Cancellation,
+    processes_only: bool,
+    overview: bool,
 ) -> Result<serde_json::Value> {
     let sample_ms = request.sample_ms.unwrap_or(2000);
     let limit = request.limit.unwrap_or(10);
@@ -91,6 +114,16 @@ pub fn snapshot(
             }
         })
         .collect();
+    let disappeared = initial
+        .keys()
+        .filter(|(pid, start)| {
+            !system
+                .processes()
+                .get(pid)
+                .is_some_and(|p| p.start_time() == *start)
+        })
+        .count();
+    let rankings = overview.then(|| process_rankings(&processes, limit));
     match request.sort {
         ProcessSort::Memory => processes.sort_by_key(|p| std::cmp::Reverse(p.memory_bytes)),
         ProcessSort::Cpu => processes.sort_by(|a, b| {
@@ -111,8 +144,27 @@ pub fn snapshot(
         result["system"] = serde_json::json!({"cpu_percent":(!system.cpus().is_empty()).then_some(system.global_cpu_usage()), "memory_total_bytes":(system.total_memory()>0).then_some(system.total_memory()),
             "memory_used_bytes":(system.total_memory()>0).then_some(system.used_memory()), "memory_available_bytes":(system.total_memory()>0).then_some(system.available_memory()), "disks":disks});
     }
+    if let Some(rankings) = rankings {
+        result["process_rankings"] = rankings;
+        result["disappeared_processes"] = serde_json::json!(disappeared);
+    }
     result["facts_for_explanation"] = explanation_facts(&result);
     Ok(result)
+}
+
+fn process_rankings(processes: &[Process], limit: usize) -> serde_json::Value {
+    let mut memory = processes.to_vec();
+    memory.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes).then(a.pid.cmp(&b.pid)));
+    memory.truncate(limit);
+    let mut cpu = processes.to_vec();
+    cpu.sort_by(|a, b| {
+        b.cpu_percent_total
+            .unwrap_or(-1.0)
+            .total_cmp(&a.cpu_percent_total.unwrap_or(-1.0))
+            .then(a.pid.cmp(&b.pid))
+    });
+    cpu.truncate(limit);
+    serde_json::json!({"memory":memory,"cpu":cpu})
 }
 
 fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
@@ -124,6 +176,17 @@ fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
     })).collect();
     let mut facts = json!({"processes":processes, "observed_at":result["observed_at"],
         "instruction":"直接引用这些数值和单位，不重新换算。每个结果是独立采样，不混合不同样本。仅解释短时事实，不能排除未观测的瓶颈。"});
+    if let Some(rankings) = result.get("process_rankings") {
+        facts.as_object_mut().unwrap().remove("processes");
+        for sort in ["cpu", "memory"] {
+            facts["process_rankings"][sort] = json!(rankings[sort].as_array().into_iter().flatten().map(|p| json!({
+                "pid":p["pid"],"name":p["name"],"memory":human_bytes(&p["memory_bytes"]),"cpu_total":percent(&p["cpu_percent_total"])
+            })).collect::<Vec<_>>());
+        }
+        facts["cpu_interval_ms"] = result["cpu_interval_ms"].clone();
+        facts["disappeared_processes"] = result["disappeared_processes"].clone();
+        facts["limits"] = result["limits"].clone();
+    }
     if let Some(system) = result.get("system") {
         facts["system"] = json!({"cpu_total":percent(&system["cpu_percent"]),
             "memory_total":format!("{} GiB", gib(&system["memory_total_bytes"])),
@@ -149,6 +212,33 @@ fn cpu_percent(before_ms: u64, after_ms: u64, elapsed_ms: f64) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::cpu_percent;
+    #[test]
+    fn overview_rankings_are_selected_before_truncation_and_explained_together() {
+        let rows: Vec<_> = (0..12)
+            .map(|pid| super::Process {
+                pid,
+                started_at_unix: Some(1),
+                name: format!("fixture-{pid}"),
+                memory_bytes: (pid != 11).then_some(1000 - u64::from(pid)),
+                cpu_percent_one_core: (pid != 11).then_some(pid as f32 * 2.0),
+                cpu_percent_total: (pid != 11).then_some(pid as f32),
+            })
+            .collect();
+        let rankings = super::process_rankings(&rows, 10);
+        assert_eq!(rankings["cpu"][0]["pid"], 10);
+        assert_eq!(rankings["memory"][0]["pid"], 0);
+        assert_eq!(rankings["cpu"].as_array().unwrap().len(), 10);
+        let all = super::process_rankings(&rows, 50);
+        assert_eq!(all["cpu"][11]["cpu_percent_total"], serde_json::Value::Null);
+        let facts = super::explanation_facts(
+            &serde_json::json!({"process_rankings":rankings,"cpu_interval_ms":712,"disappeared_processes":2}),
+        );
+        assert_eq!(facts["process_rankings"]["cpu"][0]["name"], "fixture-10");
+        assert_eq!(facts["process_rankings"]["memory"][0]["name"], "fixture-0");
+        assert_eq!(facts["cpu_interval_ms"], 712);
+        assert_eq!(facts["disappeared_processes"], 2);
+        assert!(facts.get("processes").is_none());
+    }
     #[test]
     fn explanation_facts_use_binary_units_and_keep_unknown_values() {
         let facts = super::explanation_facts(&serde_json::json!({

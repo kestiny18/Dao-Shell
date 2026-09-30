@@ -29,7 +29,17 @@ double-click restores the default. The computer overview offers cards or a list
 for registered apps, with local icons where available and initials otherwise.
 Sidebar width and app view are remembered on this device.
 
-Network interfaces always use cards. Registered applications use the page scroll
+Network interfaces always use cards.
+The resource details section shows CPU and memory top-ten process lists from the
+same short observation, with whole-machine CPU percentages and binary memory units.
+Changing the sort does not sample again. The time/window, unknown values and number
+of processes lost between observations remain visible. Refresh is manual after the
+initial overview load; a failed refresh retains the dated previous snapshot. No
+process history is persisted. Model explanation is opt-in and sends the displayed
+system/disk facts and both top-ten lists (process names, PIDs and usage), not the
+application catalog. A high value alone does not identify a slowdown's cause.
+
+Registered applications use the page scroll
 and display all collected records (registry enumeration still has a safety bound).
 Installation sizes are registry `EstimatedSize` estimates; missing values are unknown,
 not zero, and no installation directory is scanned. Running badges require an exact
@@ -128,7 +138,7 @@ Like the CLI, natural-language requests send the prompt and relevant tool result
 (including file names, paths and metadata) to the configured model provider.
 File contents are not read by these tools. Direct filename search and the home page stay local.
 The explicit explanation button sends the displayed CPU/memory/disk snapshot and
-top-five process facts to the configured model; it does not send the application inventory.
+CPU and memory top-ten process facts to the configured model; it does not send the application inventory.
 
 ## Development checks
 

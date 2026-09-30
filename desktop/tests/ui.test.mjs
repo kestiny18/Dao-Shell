@@ -21,12 +21,13 @@ async function fixture(options = {}) {
     if (command === 'load_workspace') { if (options.loadFailure) throw Error('broken workspace'); return clone(savedWorkspace); }
     if (command === 'save_workspace') { if (saveGate) await saveGate; if (saveFailure) throw Error('disk full'); savedWorkspace = clone(args.workspace); return; }
     if (['register_session','finish_close'].includes(command)) return;
-    if (command === 'session_info') return { roots:current.config.read_roots, model:'fixture-model', model_error:null, access_mode:current.config.access_mode };
+    if (command === 'session_info') return { roots:current.config.read_roots, model:options.noModel ? null : 'fixture-model', model_error:options.noModel ? '未配置模型' : null, access_mode:current.config.access_mode };
     if (command === 'get_settings') return clone(current);
     if (command === 'choose_directory') { if(options.directoryError) throw Error('picker unavailable'); return options.directory ?? null; }
     if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return clone(current); }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
     if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
+    if (command === 'computer_overview' && options.overview) return options.overview();
     if (command === 'computer_overview') return {system:{cpu_percent:12.5,memory_used_bytes:1024,memory_total_bytes:2048,memory_available_bytes:1024,disks:[{mount:'C:\\',total_bytes:4096,available_bytes:2048}]},device:{host:'Fixture computer',os:'Fixture OS',uptime_seconds:3600,architecture:'x86_64'},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:'Fixture counters'},applications:{items:[{name:'<img src=x onerror=alert(1)>',version:'1'}],available:true,partial:true,limits:'Partial fixture'}};
     if (command === 'perform') {
       const emit = event => args.onEvent.onmessage({...event,session_id:args.sessionId,execution_id:args.requestId}); events.push(emit);
@@ -511,4 +512,40 @@ test('application failure restores controls and menu routes admin and location e
     row.dispatchEvent(new f.w.MouseEvent('contextmenu',{bubbles:true,cancelable:true}));f.w.document.querySelectorAll('[role=menuitem]')[index].click();await f.tick();
     assert.deepEqual(f.calls.filter(c=>c.command==='application_action').at(-1).args,{appId:'bound',action});assert.match(f.$('activity').textContent,/目标已变化/);assert.equal(f.$('refresh-home').disabled,false);
   }
+});
+
+test('resource details preserve one sample across sorting, high/low/unknown and vanished processes', async (t) => {
+  const f=await fixture({noModel:true});t.after(()=>f.dom.window.close());
+  const snapshot=clone(f.w.eval('homeSnapshot'));
+  const heavy={name:'CPU fixture <script>',pid:10,cpu_percent_total:95,memory_bytes:1024};
+  const light={name:'Memory fixture',pid:20,cpu_percent_total:0.04,memory_bytes:8192};
+  const unknown={name:'Restricted fixture',pid:30,cpu_percent_total:null,memory_bytes:null};
+  Object.assign(snapshot,{cpu_interval_ms:725,matched_processes:3,disappeared_processes:2,process_rankings:{cpu:[heavy,light,unknown],memory:[light,heavy,unknown]}});
+  f.w.renderOverview(snapshot);
+  assert.match(f.$('resource-sample').textContent,/0.72 秒/);
+  assert.match(f.$('resource-coverage').textContent,/2 个进程/);
+  assert.match(f.$('resource-processes').rows[0].textContent,/CPU fixture.*95.0%/);
+  assert.match(f.$('resource-processes').rows[1].textContent,/<0.1%/);
+  assert.match(f.$('resource-processes').rows[2].textContent,/未知未知/);
+  assert.equal(f.$('resource-processes').querySelector('script'),null);
+  f.w.document.querySelector('[data-process-sort="memory"]').click();
+  assert.match(f.$('resource-processes').rows[0].textContent,/Memory fixture/);
+  assert.equal(f.calls.filter(c=>c.command==='computer_overview').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+  assert.ok(!JSON.stringify(f.saved()).includes('CPU fixture'));
+});
+
+test('failed resource refresh retains dated facts and never requests a model', async (t) => {
+  const f=await fixture({overview:()=>{throw Error('fixture sampling unavailable');}});t.after(()=>f.dom.window.close());
+  assert.match(f.$('device-summary').textContent,/暂不可用/);
+  assert.ok(f.$('explain-home').disabled);
+  const snapshot={system:{cpu_percent:null,memory_used_bytes:null,memory_total_bytes:null,memory_available_bytes:null,disks:[]},device:{host:'fixture',uptime_seconds:0},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:''},applications:{items:[],limits:''},process_rankings:{cpu:[],memory:[]}};
+  f.w.renderOverview(snapshot);
+  assert.equal(f.$('cpu-value').textContent,'暂不可用');
+  assert.equal(f.$('resource-empty').hidden,false);
+  const stamp=f.$('resource-sample').textContent;
+  f.$('refresh-home').click();await f.tick();
+  assert.match(f.$('device-summary').textContent,/保留上一次/);
+  assert.equal(f.$('resource-sample').textContent,stamp);
+  assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
 });

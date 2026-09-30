@@ -198,3 +198,9 @@ header { padding: 12px 0; gap: 12px; }
 .app-context-menu button:hover, .app-context-menu button:focus-visible { background: var(--tint); }
 .app-context-menu button[aria-disabled=true] { opacity: .55; cursor: default; }
 .app-context-menu small { display: block; font-size: 11px; white-space: normal; margin-top: 3px; }
+/* Resource rows remain readable on narrow windows without widening the page. */
+.process-table-scroll { overflow-x:auto; }
+.process-table { width:100%; border-collapse:collapse; font-size:13px; }
+.process-table th,.process-table td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+.process-table td:first-child { overflow-wrap:anywhere; }
+.process-table th:not(:first-child),.process-table td:not(:first-child) { white-space:nowrap; text-align:right; }

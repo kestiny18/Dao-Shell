@@ -14,6 +14,7 @@ fn main() {
             "save_settings",
             "test_connection",
             "computer_overview",
+            "computer_profile",
             "application_action",
         ]),
     ))

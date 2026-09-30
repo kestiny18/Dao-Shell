@@ -13,6 +13,7 @@
     "allow-save-settings",
     "allow-test-connection",
     "allow-computer-overview",
+    "allow-computer-profile",
     "core:event:default",
     "allow-load-workspace",
     "allow-save-workspace",

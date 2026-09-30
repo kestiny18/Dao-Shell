@@ -121,6 +121,13 @@ async fn application_action(
         .map_err(|_| "应用操作中断".to_string())?
 }
 #[tauri::command]
+async fn computer_profile(state: State<'_, Arc<Bridge>>) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.profile())
+        .await
+        .map_err(|_| "电脑档案读取中断".to_string())?
+}
+#[tauri::command]
 async fn choose_directory(window: tauri::Window) -> Result<Option<String>, String> {
     #[cfg(windows)]
     let owner = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
@@ -156,6 +163,7 @@ fn main() {
             save_settings,
             test_connection,
             computer_overview,
+            computer_profile,
             application_action
         ])
         .on_window_event(|window, event| {

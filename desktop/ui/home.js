@@ -136,3 +136,36 @@ document.querySelectorAll('[data-app-view]').forEach((button) => button.addEvent
 }));
 $('explain-home').addEventListener('click', () => { if (homeSnapshot) run('explain'); });
 refreshOverview();
+
+// Keep the profile out of overview/model facts and persistence. Only this whitelist
+// becomes visible and copyable; IPC objects may contain additional fields.
+let profileSnapshot = null;
+let profileText = '';
+function profileSummary(profile) {
+  const label = value => typeof value === 'string' && value.trim() ? value : '未知';
+  const names = values => Array.isArray(values) && values.length ? values.map(label).join('；') : '未知';
+  const size = value => Number.isFinite(value) && value > 0 ? humanBytes(value) : '未知';
+  const volumes = Array.isArray(profile.volumes) && profile.volumes.length ? profile.volumes.map((bytes, i) => `卷 ${i + 1}：${size(bytes)}`).join('；') : '未知';
+  return [`品牌：${label(profile.brand)}`, `型号：${label(profile.model)}`, `操作系统：${label(profile.os)}`, `CPU：${names(profile.cpus)}`, `总内存：${size(profile.memory_bytes)}`, `显示适配器：${names(profile.graphics)}`, `卷容量（不是物理硬盘，不累加）：${volumes}`, `采集时间：${label(profile.observed_at)}`].join('\n');
+}
+async function refreshProfile() {
+  if (!api || busy) { $('profile-status').textContent = '请等待当前操作完成后读取档案。'; return; }
+  setBusy(true); $('profile-status').textContent = '正在读取本机电脑档案…';
+  try {
+    const profile = await api.invoke('computer_profile');
+    profileText = profileSummary(profile); profileSnapshot = profile;
+    $('profile-summary').textContent = profileText;
+    $('profile-status').textContent = '已读取；复制仅包含下方摘要，不含主机名、用户名、序列号、地址或私人路径。';
+  } catch (error) { $('profile-status').textContent = `读取失败：${error}${profileSnapshot ? '；保留上次摘要和采集时间。' : ''}`; }
+  finally { setBusy(false); }
+}
+$('computer-profile').addEventListener('toggle', () => { if ($('computer-profile').open && !profileSnapshot) refreshProfile(); });
+$('refresh-profile').addEventListener('click', refreshProfile);
+$('copy-profile').addEventListener('click', async () => {
+  if (!profileText) { $('profile-status').textContent = '请先读取电脑档案。'; return; }
+  try {
+    if (!navigator.clipboard?.writeText) throw Error('当前环境不支持剪贴板，请选择下方摘要手动复制');
+    await navigator.clipboard.writeText(profileText);
+    $('profile-status').textContent = '摘要已复制。';
+  } catch (error) { $('profile-status').textContent = `复制失败：${error}`; }
+});

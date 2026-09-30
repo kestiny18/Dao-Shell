@@ -209,3 +209,14 @@ Windows protection. Only the setup executable is required for installation.
 Installer implementation reference: [Tauri Windows distribution](https://v2.tauri.app/distribute/windows-installer/).
 
 See the [experiment record](../docs/experiments/desktop-entry.md) for boundaries and evidence.
+
+
+Computer profile loads only when expanded or explicitly refreshed, is cached in
+this window, and never enters model facts or workspace history. It reads CPU and
+memory via sysinfo, Windows firmware manufacturer/product registry values, and
+EnumDisplayDevices adapter descriptions. Missing/OEM placeholder values remain
+unknown; display adapters may be virtual. Storage lists individual volume capacities
+without paths or a summed physical-device claim. Copy uses the same visible
+whitelisted summary (including its collection time); machine/user names, serials,
+network addresses and private mount paths are excluded. Clipboard failures are
+reported and the selectable summary remains available for manual copying.

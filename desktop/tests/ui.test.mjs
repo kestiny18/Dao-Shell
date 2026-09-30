@@ -27,6 +27,7 @@ async function fixture(options = {}) {
     if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return clone(current); }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
     if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
+    if (command === 'computer_profile') { if (options.profile) return options.profile(); return {brand:'Fixture',model:null,os:'Windows fixture',cpus:['CPU A'],memory_bytes:8589934592,graphics:['GPU A','GPU B'],volumes:[1073741824,2147483648],observed_at:'fixture time',host:'SECRET_HOST',serial:'SECRET_SERIAL',mount:'SECRET_PATH'}; }
     if (command === 'computer_overview' && options.overview) return options.overview();
     if (command === 'computer_overview') return {system:{cpu_percent:12.5,memory_used_bytes:1024,memory_total_bytes:2048,memory_available_bytes:1024,disks:[{mount:'C:\\',total_bytes:4096,available_bytes:2048}]},device:{host:'Fixture computer',os:'Fixture OS',uptime_seconds:3600,architecture:'x86_64'},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:'Fixture counters'},applications:{items:[{name:'<img src=x onerror=alert(1)>',version:'1'}],available:true,partial:true,limits:'Partial fixture'}};
     if (command === 'perform') {
@@ -548,4 +549,29 @@ test('failed resource refresh retains dated facts and never requests a model', a
   assert.match(f.$('device-summary').textContent,/保留上一次/);
   assert.equal(f.$('resource-sample').textContent,stamp);
   assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+});
+
+
+test('profile loads on demand, caches, preserves device lists and copies only visible whitelist', async(t) => {
+  const f=await fixture({noModel:true}); t.after(()=>f.dom.window.close());
+  assert.equal(f.calls.filter(c=>c.command==='computer_profile').length,0);
+  f.$('computer-profile').open=true; await f.tick();
+  const text=f.$('profile-summary').textContent;
+  assert.match(text,/8.0 GiB/); assert.match(text,/GPU A；GPU B/);
+  assert.match(text,/卷 1：1.0 GiB；卷 2：2.0 GiB/); assert.match(text,/型号：未知/);
+  assert.doesNotMatch(text,/SECRET/);
+  f.$('computer-profile').open=false; await f.tick();f.$('computer-profile').open=true;await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='computer_profile').length,1);
+  let copied;Object.defineProperty(f.w.navigator,'clipboard',{value:{writeText:async text=>{copied=text;}}});
+  f.$('copy-profile').click();await f.tick();assert.equal(copied,text);assert.match(f.$('profile-status').textContent,/已复制/);
+  f.$('refresh-profile').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='computer_profile').length,2);
+  assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+});
+test('profile unknowns, failed refresh, clipboard rejection and request exclusion',async(t)=>{
+  let attempts=0;const f=await fixture({profile:()=>{if(++attempts>1)throw Error('fixture failure');return {observed_at:'old',volumes:[null],graphics:[]};}});t.after(()=>f.dom.window.close());
+  f.$('refresh-profile').click();await f.tick();const text=f.$('profile-summary').textContent;
+  assert.match(text,/总内存：未知/);assert.match(text,/显示适配器：未知/);assert.match(text,/卷 1：未知/);
+  f.$('refresh-profile').click();await f.tick();assert.equal(f.$('profile-summary').textContent,text);assert.match(f.$('profile-status').textContent,/保留上次/);
+  Object.defineProperty(f.w.navigator,'clipboard',{value:{writeText:async()=>{throw Error('denied');}}});f.$('copy-profile').click();await f.tick();assert.match(f.$('profile-status').textContent,/复制失败/);
+  f.w.eval('setBusy(true)');assert.equal(f.$('refresh-profile').disabled,true);await f.w.eval('refreshProfile()');assert.equal(attempts,2);f.w.eval('setBusy(false)');
 });

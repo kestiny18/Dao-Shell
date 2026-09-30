@@ -1,11 +1,11 @@
 # P8 — 精简电脑档案
 
-Implementation: PLANNED
-Self-test: NOT_VERIFIED
+Implementation: READY
+Self-test: PASS
 Independent testing: NOT_RUN
 Independent review: NOT_RUN
-Authorization: 用户确认加入后续计划；尚未授权开始实施。
-Delivery: 本轮仅记录计划，不改产品代码。
+Authorization: 用户明确执行P7、P8，按顺序实现与自测；独立验证未触发。
+Delivery: 工作区原型；不提交、推送或发布。
 
 ## Goal / Scope
 为用户提供简明、可复制的电脑配置摘要，用于了解设备和向他人描述问题，不堆砌低频参数。
@@ -26,3 +26,15 @@ Delivery: 本轮仅记录计划，不改产品代码。
 
 ## Open questions
 系统接口具体来源和缓存时机在实施前核对本地库及官方文档；不承诺每种设备均提供完整型号。
+
+Baseline: 42d95d44cc8d89a45bd661dd597eecf5bc558396；开始时工作区干净。
+
+## Delivery — 2026-09-30
+- Implementation READY / Self-test PASS；Independent testing/review NOT_RUN。
+- 默认折叠，展开时经独立窄命令按需加载，本窗口缓存、手动刷新，失败保留上一份摘要和时间。共享请求锁，后台线程采集，不进入模型事实/会话历史或后台轮询。
+- 系统来源：sysinfo的CPU/内存/卷容量、Windows BIOS注册表品牌型号、EnumDisplayDevicesW适配器名称。无新依赖/联网/提权。未知及常见OEM占位如实显示，适配器上限64且可能含虚拟显示设备。
+- 复制与可见白名单摘要一致，排除主机名、用户名、序列号、IP/MAC、私人挂载路径和凭据。卷编号表示容量，不冒充物理盘总容量。等待剪贴板Promise成功才提示已复制，失败可手动选中复制。
+- 修改：新增src/profile.rs及computer_profile命令权限；src/lib.rs、Tauri build/capability/main/bridge、desktop app/home/index/style/tests/README；P7实现保留。
+- Coder自测：profile:: 1/1；完整DOM37/37；desktop10/10，补充共享锁定向1/1；resources::3/3、无模型统一入口1/1；核心/桌面fmt、Clippy all-targets -D warnings、JS语法与产品diff检查通过；最终build成功。
+- 候选：HEAD42d95d44cc8d89a45bd661dd597eecf5bc558396加P7/P8未提交代码。desktop/src-tauri/target/debug/dao-shell-desktop.exe SHA256 9971F77B83D18317694CA550245D2498D804C8F287E7F81ECA2CD28F7118C5B7，主Agent核对一致。
+- 未验证：真实硬件采集、原生视觉、实际剪贴板、普通权限/OEM/虚拟混合显卡兼容性。API核对本地绑定及编译，测试使用模拟数据。无提交推送或其他功能扩展。

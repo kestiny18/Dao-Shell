@@ -204,3 +204,5 @@ header { padding: 12px 0; gap: 12px; }
 .process-table th,.process-table td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
 .process-table td:first-child { overflow-wrap:anywhere; }
 .process-table th:not(:first-child),.process-table td:not(:first-child) { white-space:nowrap; text-align:right; }
+
+.profile-summary { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }

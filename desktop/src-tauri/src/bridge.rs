@@ -126,6 +126,14 @@ impl Bridge {
         *self.overview.lock().map_err(|_| "概览不可用".to_string())? = Some(snapshot.clone());
         Ok(snapshot)
     }
+    pub fn profile(&self) -> Result<Value, String> {
+        self.reserve()?;
+        let _release = Release(self);
+        serde_json::to_value(
+            dao_shell::profile::collect(&self.control.cancellation()).map_err(error)?,
+        )
+        .map_err(error)
+    }
     pub fn application_action(&self, id: &str, action: &str) -> Result<Value, String> {
         self.reserve()?;
         let _release = Release(self);
@@ -321,6 +329,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bridge = Bridge::with_path(dir.path().join("config.json"));
         bridge.reserve().unwrap();
+        assert!(bridge.profile().unwrap_err().contains("请求"));
         assert!(
             bridge
                 .application_action("unknown", "uninstall")

@@ -170,7 +170,7 @@ function setBusy(value) {
   $('send').disabled = value || !ready; $('input').disabled = !ready;
   $('reset').disabled = !ready;
   $('cancel').hidden = !value || applicationBusy; $('settings-cancel').hidden = !value || applicationBusy;
-  document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home').forEach(n => {n.disabled = value;});
+  document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home,#refresh-profile').forEach(n => {n.disabled = value;});
   document.querySelectorAll('.file-row button').forEach(n => {n.disabled = value;});
 }
 function message(text, role = 'assistant', error = false, id = workspace.active) {

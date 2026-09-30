@@ -9,6 +9,7 @@ pub mod model;
 pub mod operations;
 pub mod platform;
 mod presentation;
+pub mod profile;
 pub mod resources;
 pub mod session;
 pub mod storage;

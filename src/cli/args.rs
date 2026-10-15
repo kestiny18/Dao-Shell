@@ -12,10 +12,12 @@ pub struct Args {
     pub config: Option<PathBuf>,
     #[arg(long, global = true)]
     pub data_dir: Option<PathBuf>,
-    /// 为本次运行增加可读目录。
+    /// Add readable directories for this run.
+    #[arg(help = "为本次运行增加可读目录。")]
     #[arg(long, global = true)]
     pub read_root: Vec<PathBuf>,
-    /// 为本次运行增加可写目录（同时可读）。
+    /// Add writable directories for this run; they are also readable.
+    #[arg(help = "为本次运行增加可写目录（同时可读）。")]
     #[arg(long, global = true)]
     pub write_root: Vec<PathBuf>,
     #[command(subcommand)]
@@ -23,9 +25,11 @@ pub struct Args {
 }
 #[derive(Subcommand)]
 pub enum Command {
-    /// 引导连接模型、输入密钥和选择目录；可选择发送固定样例验证连接。
+    /// Guide model setup, key entry and folder selection, with an optional synthetic check.
+    #[command(about = "引导连接模型、输入密钥和选择目录；可选择发送固定样例验证连接。")]
     Setup,
-    /// 不调用模型，直接搜索名称与元数据。
+    /// Search names and metadata directly without a model.
+    #[command(about = "不调用模型，直接搜索名称与元数据。")]
     Search {
         #[arg(default_value = "")]
         query: String,
@@ -49,11 +53,13 @@ pub enum Command {
         limit: usize,
         #[arg(long)]
         json: bool,
-        /// 打开这次结果中的第几项（从 1 开始）。
+        /// Open the selected item from these results, numbered from one.
+        #[arg(help = "打开这次结果中的第几项（从 1 开始）。")]
         #[arg(long)]
         open: Option<usize>,
     },
-    /// 采样 CPU、内存、磁盘空间与进程，不请求模型。
+    /// Sample CPU, memory, disk space and processes without a model.
+    #[command(about = "采样 CPU、内存、磁盘空间与进程，不请求模型。")]
     Resources {
         #[arg(long, default_value_t = 2000)]
         sample_ms: u64,
@@ -62,21 +68,25 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// 查看、核对已知操作，或清除已完成记录。
+    /// Inspect or reconcile known operations, or clear completed records.
+    #[command(about = "查看、核对已知操作，或清除已完成记录。")]
     History {
         #[arg(long)]
         reconcile: bool,
         #[arg(long)]
         clear: bool,
     },
-    /// 本地配置；密钥可通过 setup 输入，或从环境变量、Windows 凭据读取。
+    /// Configure local settings; keys come from setup, environment variables or Windows credentials.
+    #[command(about = "本地配置；密钥可通过 setup 输入，或从环境变量、Windows 凭据读取。")]
     Config {
         #[command(subcommand)]
         action: ConfigAction,
     },
-    /// 检查本地配置；仅 --check-model 会向模型发送固定诊断样例。
+    /// Check local settings; only --check-model sends synthetic diagnostic requests.
+    #[command(about = "检查本地配置；仅 --check-model 会向模型发送固定诊断样例。")]
     Doctor {
-        /// 验证工具调用及结果回传（最多两次请求，可能产生模型费用，不发送本机信息）。
+        /// Check tool calls and replies using at most two requests, without local computer data.
+        #[arg(help = "验证工具调用及结果回传（最多两次请求，可能产生模型费用，不发送本机信息）。")]
         #[arg(long)]
         check_model: bool,
     },

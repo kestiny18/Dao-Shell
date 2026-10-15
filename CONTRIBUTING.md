@@ -14,7 +14,11 @@ Keep each change focused. Explain the user-visible behavior and how you verified
 
 Use isolated fixtures when testing file operations. Real-model calls are not part of the default automated test suite. Model-generated text must never serve as evidence of user permission.
 
-Use English for new code identifiers, comments, commit messages, and pull request descriptions. The CLI currently uses Chinese; repository language changes do not require UI translation or a localization framework.
+Use English for new code identifiers, comments, commit messages, and pull request descriptions. The CLI help/output intentionally remains Chinese. The desktop supports Simplified Chinese and English through explicit message keys. Preserve both translations, accessible labels and user data; do not translate arbitrary DOM text, paths, names or saved conversation history. For Clap documentation comments, use English comments plus explicit existing Chinese help/about metadata, and compare actual help output before and after changes.
+
+Keep generated packages, build caches, databases, personal configuration and credentials out of commits. Stage explicit paths and verify the diff. Do not rewrite Git history or infer push/release authorization from a plan. Preserve dated Plans, logs and research fixtures; use the [documentation layers](docs/README.en.md) to find current guidance.
+
+Local package builds are not published releases. Rebuild formal artifacts from the final commit and record checksum, self-tests and unverified installation/service paths. Independent testing and review are opt-in; implementation self-tests must not be labeled independent acceptance.
 
 ## Building in public
 

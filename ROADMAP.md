@@ -1,48 +1,32 @@
 # Roadmap
 
-这份路线图记录当前优先级，不是交付日期承诺。先验证日常使用是否有帮助，再决定下一步。
+Current as of 2026-10-15. Priorities follow trial feedback, not delivery-date promises. [中文项目入口](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 
-## 已有的第一块积木
+## Implemented preview capabilities
 
-- [x] Windows 命令行入口。
-- [x] LLM 工具调用循环；模型协议用本地模拟服务验证。
-- [x] 文件查找、对象选择与打开请求。
-- [x] 先确认、再移动、最后核对的小批量整理。
-- [x] 资源和进程观测，以及无模型搜索入口。
-- [x] 本地操作记录、取消与中断后的结果核对。
+- Windows desktop with an overview, remembered session tabs/history and model/access/theme/language settings.
+- English and Simplified Chinese desktop; system UI default plus saved override. CLI messages remain Chinese.
+- Natural-language file tools and filename fallback; current candidate clicks use the OS default application directly, with scope and identity checks.
+- CPU/memory rankings together, responsive disk cards, registered apps, local app actions and a compact computer profile.
+- Explicitly confirmed ending of verifiable current-user process instances; no model process-termination tool.
+- Directory snapshots and a Windows index service for supported fixed NTFS name discovery, selected automatically in desktop Full access when a matching component is installed.
+- Separate CLI with guarded same-volume moves, cancellation and durable operation receipts.
+- A local small WebView2-bootstrapper installer and bilingual trial guides. No installer is uploaded by repository preparation.
 
-验证范围见 [实现记录](docs/IMPLEMENTATION.md)，最新改动见 [Changelog](CHANGELOG.md)。
+These are prototype capabilities, not completed independent acceptance. The [desktop reference](desktop/README.md), [plans](docs/plans/README.md) and [development records](docs/devlog/README.md) separate code, self-tests and real-machine evidence.
 
-## 正在进入的阶段：真实试用
+## Current priorities
 
-- [x] 首轮真实模型查找、指代与打开：用户在 Windows 上使用 DeepSeek 完成验证。
-- [ ] 持续记录真实模型的兼容情况、成本和延迟。
-- [ ] 固定 15 个场景，各跑 3 次，公开成功、失败和原因。
-- [x] 交互式设置、保存前校验与模型连接诊断；继续收集首次使用反馈。
-- [ ] 在干净 Windows 11 x64 环境验证获取、启动、打开和文件整理。
-- [ ] 覆盖权限不足、跨卷请求、文件变化和中途取消。
-- [ ] 发布标明限制的可下载开发预览包，再收集使用反馈。
+1. Diagnose persistent C/E indexing failures on another trial computer using the safe report; the cause is still NOT_REPRODUCED locally.
+2. Complete missing Windows service installation/update/rollback/repair/uninstall and reboot/recovery evidence through explicitly authorized trials. Do not retry canceled elevation automatically.
+3. Validate clean-machine installation, missing-WebView2 network/offline cases and representative English Windows environments. Local builds and synthetic model checks do not prove these paths.
+4. Gather real-model compatibility and everyday file-search/resource-explanation feedback, including costs and failures. Keep the original broader scenario/move acceptance gaps visible.
+5. Rebuild a traceable preview from the final repository commit before a public release; attach checksum and verification limits.
 
-总体通过率是参考；动错文件、未经确认修改、把未知说成成功，任何一项都阻止稳定版发布。
+Query-time acceleration, name caches/FTS and collector-algorithm tuning are deferred in favor of functional completeness. Index coverage does not grant reading/opening/writing authority. Background index maintenance does not imply an autonomous background agent.
 
-## 下一步：小范围验证 Computer Runtime 的积木
+## Later exploration
 
-三个方向依次推进，实验结果决定实现方式；不把探索当作稳定版已经交付。
+Other operating systems remain behind platform boundaries; Windows is the only current desktop delivery target. Further app capabilities and deeper integration should follow concrete useful scenarios. A generic SDK, coding agent, long-running goals and plugin platform are outside the next step.
 
-1. **Windows 文件索引原型**：独立实验入口，已验证普通权限下的元数据快照、文件通知增量更新、目录变化/重启后的重扫，以及 USN 访问权限限制。[实验说明](docs/experiments/file-inventory.md)。MFT 枚举、USN 增量回放、原生丢失场景和全机性能仍待验证。
-2. **最小桌面入口**：Tauri 开发预览已实现自然语言输入、真实候选、确认打开、本地回执与取消。本机原生窗口使用模拟模型验证；真实模型体验及分发仍待验证。[运行说明](desktop/README.md)。
-3. **随第二个入口提炼核心接口**：已提取进程内文件会话，复用文件操作规则并隔离候选、取消和待确认状态；CLI 暂保留原有装配。确认绑定具体对象和一次性请求，不扩展通用 SDK。[接口边界](docs/experiments/desktop-entry.md)。
-
-2026-09-21 已加入电脑概览、模型/访问/外观设置、多连接，以及共享的请求控制层。
-完全访问保留确认与系统权限边界；新界面于 2026-09-22 完成隔离夹具的原生复验，真实模型体验与干净机器分发仍需后续验证。[本轮计划](docs/plans/2026-09-21-desktop-evolution.md)。
-
-索引记录不授予读写权限，也不能替代操作前的实时身份核对。后台索引维护与后台自主 Agent 是不同的能力。SDK 和更深的 OS 集成保留为远期方向，不提前建设通用框架。
-
-## 后面再探索
-
-- 应用查找与安装的独立试验。
-- 其他操作系统的实际适配。
-
-长期目标系统、编程 Agent、后台自主工作和通用插件平台不在当前路线图中。
-
-最值得先做什么，欢迎用一个真实的 [使用场景](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml) 来讨论。
+[Share a use case](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml).

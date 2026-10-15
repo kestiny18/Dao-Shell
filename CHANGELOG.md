@@ -4,6 +4,24 @@
 
 ## Unreleased — 第一版公开开发预览
 
+### 2026-10-15
+
+- Add English/Simplified Chinese desktop messages, Windows user-UI-language defaults, saved manual override and matching guidance for new model replies. Preserve user text, paths, titles and existing conversation history; CLI output stays Chinese.
+- Build a local small WebView2-bootstrapper trial package with bilingual instructions. No public upload or stable-release claim; package and native evidence are versioned in the P13 record.
+- Prepare current public/engineering/history documentation and English source comments while preserving Chinese Clap help byte for byte. Preserve Git history and existing research; formal artifacts should be rebuilt from the final release commit.
+
+### 2026-10-14
+
+- Refine memory percentages/capacities, responsive disk cards, simultaneous CPU/memory rankings, overview jumps and known-running application ordering; add explicitly confirmed current-user process ending.
+- Use the matching Windows name-index component automatically with desktop Full access; keep ordinary startup/search free of automatic installation/elevation. Add safe diagnostic reports and preserve bounded compatible-folder fallback.
+- Open current clicked candidates through the Windows default application, including HTML/EXE, without a second app confirmation; model-initiated opening and all access/identity checks remain guarded.
+- Collapse and deduplicate local search receipts while keeping incomplete coverage and failures visible. Another trial computer's persistent C/E volume failures remain NOT_REPRODUCED; P11 lifecycle evidence and deferred performance work are not marked complete.
+
+### 2026-09-24 to 2026-10-13
+
+- Add fixed Overview/session tabs, remembered visible workspace history, simpler model/access directory settings, application actions, resource detail and compact device-profile views.
+- Integrate selected-directory inventories, explore NTFS volume discovery and implement the Windows indexing service/client path. Dated Plans/devlogs retain each stage's actual evidence and remaining limits.
+
 ### 2026-09-24
 
 - Add a single Windows x64 preview setup executable with an offline WebView2 installer, D/chevron icon, current-user installation and separate program/configuration directories.

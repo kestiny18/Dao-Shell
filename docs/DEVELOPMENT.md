@@ -1,6 +1,6 @@
 # 开发指南
 
-产品介绍见 [README](../README.zh-CN.md)，初次试用见 [体验指南](GETTING_STARTED.zh-CN.md)。
+产品介绍见 [README](../README.zh-CN.md)，初次试用见 [体验指南](GETTING_STARTED.zh-CN.md)。桌面中英文、会话、权限和索引组件参考 [桌面说明](../desktop/README.md)；历史设计与实验通过 [文档导航](README.md) 分层查找。
 
 ## 获取与构建
 
@@ -59,6 +59,11 @@ src/
   dialogue.rs       # 上下文与有限工具调用循环
   model.rs / model/ # Provider 配置、模型传输、固定样例的连接诊断
   settings.rs       # 入口无关的配置保存、版本检查与凭据更新
+  localization.rs   # 桌面语言配置与Windows用户UI语言分流
+  inventory/        # 兼容目录快照与通知更新
+  file_index/       # Windows卷发现、USN与索引服务
+  search_index/     # 普通权限认证查询适配
+  process_control/  # 显式本地进程操作的原生身份复核
   runtime.rs        # 执行、权限、持久写操作要求
   runtime/control.rs # 请求互斥、取消、一次性确认
   computer.rs       # 本地电脑概览，带覆盖限制和采样时间
@@ -81,6 +86,10 @@ docs/               # 体验、设计、实现证据与开发记录
 .\scripts\package-windows.ps1
 ```
 
-需要 PowerShell 7，输出便携目录、ZIP、SHA256 校验文件与依赖许可说明。打包本身不发布 GitHub Release，不代表干净 Windows 环境验收。
+以上为CLI便携包。桌面使用 `scripts/package-desktop-windows.ps1 -Jobs 2`，要求先由脚本准备匹配的worker payload，保留GNU WebView2Loader.dll与两语指南。组件准备/打包不安装服务，不授权提权。
+
+需要 PowerShell 7，CLI输出便携目录、ZIP、SHA256 校验文件与依赖许可说明。打包本身不发布 GitHub Release，不代表干净 Windows 环境验收。
 
 `.tools`、`target`、`dist`、数据库、日志、环境文件和 `local` 目录不入库。样例使用虚构文件名；公开错误和截图前移除个人路径、凭据与私人对话地址。
+
+本地P13安装包保留原版本与校验值，不因文档/等价帮助整理重复生成。正式公开产物应从最终提交重新构建；完整实机服务生命周期、另一台电脑C/E诊断与干净机器证据仍按 [P11](plans/2026-10-10-p11-windows-index-service.md) 保留，不能由编译成功替代。

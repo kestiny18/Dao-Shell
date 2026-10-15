@@ -21,7 +21,8 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
-    /// 实验：监听明确目录，文件变化增量更新，目录变化/遗漏/重启时重扫。
+    /// Experiment with explicit folder watching, file deltas and conservative reconciliation.
+    #[command(about = "实验：监听明确目录，文件变化增量更新，目录变化/遗漏/重启时重扫。")]
     Watch {
         #[arg(long)]
         root: PathBuf,
@@ -34,7 +35,8 @@ enum Command {
         #[arg(long, default_value_t = 100_000)]
         max_entries: usize,
     },
-    /// 扫描一个明确目录并原子替换快照；数据库必须位于该目录之外。
+    /// Scan one explicit folder and replace its snapshot atomically; keep the database outside it.
+    #[command(about = "扫描一个明确目录并原子替换快照；数据库必须位于该目录之外。")]
     Scan {
         #[arg(long)]
         root: PathBuf,
@@ -45,7 +47,8 @@ enum Command {
         #[arg(long, default_value_t = 60)]
         max_seconds: u64,
     },
-    /// 查询已保存的快照；不会刷新、扫描磁盘或授予操作权限。
+    /// Query a saved snapshot without refreshing, scanning or granting action permissions.
+    #[command(about = "查询已保存的快照；不会刷新、扫描磁盘或授予操作权限。")]
     Query {
         #[arg(long)]
         db: PathBuf,
@@ -54,12 +57,14 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
-    /// 查看快照时间、覆盖范围与遗漏。
+    /// Show snapshot time, coverage and omissions.
+    #[command(about = "查看快照时间、覆盖范围与遗漏。")]
     Status {
         #[arg(long)]
         db: PathBuf,
     },
-    /// Windows：只查询文件系统和 USN 日志状态，不提权、不创建或修改日志。
+    /// Query Windows file-system and USN status without elevation or journal changes.
+    #[command(about = "Windows：只查询文件系统和 USN 日志状态，不提权、不创建或修改日志。")]
     Probe {
         #[arg(long)]
         root: PathBuf,

@@ -2,11 +2,29 @@
 
 [English](GETTING_STARTED.md) · [简体中文](GETTING_STARTED.zh-CN.md)
 
-This Windows CLI development preview is for early users willing to share feedback. The interface currently uses Chinese. Start with disposable files in a separate trial folder.
+This is a Windows 10/11 x64 development preview. The desktop supports English and Simplified Chinese; the CLI remains Chinese. Start with disposable files in a separate trial folder.
+
+## Desktop first run
+
+Use a maintainer-provided `Dao-Shell-0.1.0-windows-x64-setup.exe`, or build it using the [desktop instructions](../desktop/README.md). This work has produced a local P13 trial package, not uploaded a public release. Its approximately 9.1 MB installer reuses WebView2 or downloads it through Microsoft's bundled bootstrapper; missing WebView2 requires internet or prior standalone runtime installation.
+
+1. Open Overview for local CPU/memory rankings, disks, network interfaces and registered apps. Reading the overview does not automatically request a model. Process ending requires a separate confirmation and may lose unsaved work; unknown/protected identities are refused.
+2. Choose Settings → General & appearance → Interface language. Follow system uses Simplified Chinese for Chinese Windows UI languages and English otherwise; a manual choice takes priority after Save. History, paths and custom titles are not translated.
+3. In Settings → Models, optionally configure and test a model with synthetic examples, then save. Tests can incur provider charges. Without a model, input searches file names literally.
+4. In Settings → Access, select authorized folders or Full access. Full uses a matching installed component for supported fixed local NTFS name discovery. Initial component installation/management needs explicit administrator authorization; ordinary startup/search never install or request it automatically. Unavailable services and complex filters use only the compatible folders stated in receipts.
+5. Search for a disposable file. Clicking a current result uses the system default application without a second app confirmation, including HTML and executables. Model-initiated opening still asks locally; file permission and identity checks remain. The desktop has no move tools.
+
+Session tabs/history persist locally; closing a tab preserves the session. Restart never replays tools or restores old candidates/confirmations. Natural-language requests send relevant names/paths/metadata to your provider, without file contents. Folder search and the overview stay local.
+
+For persistent volume failures, Settings → File search can generate a safe report without private file paths or account identifiers. The other trial computer's C/E failure remains unreproduced locally; service lifecycle, clean-machine and wider real-model validation gaps remain. See the [current roadmap](../ROADMAP.md).
+
+## CLI setup and disposable-file trials
+
+The rest of this guide describes the Chinese CLI. Its moves require local confirmation and a durable journal; desktop language choices do not translate CLI help.
 
 ## Get the program
 
-There is no official download release yet. With Git, Rust, and the appropriate Windows linker toolchain installed, build from source:
+For a source build of the CLI, install Git, Rust and the appropriate Windows linker toolchain:
 
 ```powershell
 git clone https://github.com/kestiny18/Dao-Shell.git

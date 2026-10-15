@@ -15,20 +15,20 @@ let saveLoop = null;
 let pendingSave = null;
 const pageScroll = new Map();
 function session(id = workspace.active) { return workspace.sessions.find(s => s.id === id); }
-function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:'准备就绪',contextLost:false}); return runtime.get(id); }
+function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false}); return runtime.get(id); }
 function pathText(path) { return String(path).replace(/^\\\\\?\\/, ''); }
 function nameOf(path) { return pathText(path).split(/[\\/]/).pop() || pathText(path); }
 function persistenceNotice(text) { $('workspace-status').textContent = text; $('workspace-status').hidden = !text; }
 function persist() {
   if (!ready || !api) return Promise.resolve();
-  if (persistenceBlocked) return Promise.reject(Error('工作区未恢复，不能保存。请关闭应用，备份并移走配置目录中的 workspace.json 后重启。'));
+  if (persistenceBlocked) return Promise.reject(Error(t('app.workspace_was_not_restored_and_cannot_be_saved_close_the_app_bac')));
   pendingSave = JSON.parse(JSON.stringify(workspace));
   if (!saveLoop) {
     saveLoop = (async () => {
       while (pendingSave) {
         const value = pendingSave; pendingSave = null;
         try { await api.invoke('save_workspace', {workspace:value}); persistenceNotice(''); }
-        catch (error) { pendingSave = null; persistenceNotice(`尚未保存：${error}。请检查磁盘和配置目录权限，然后点击“重试保存”。`); throw error; }
+        catch (error) { pendingSave = null; persistenceNotice(t('app.not_saved_value_check_disk_space_and_configuration_folder_permis',{v0:(errorText(error))})); throw error; }
       }
     })().finally(() => { saveLoop = null; });
   }
@@ -50,10 +50,10 @@ function startRename(id) {
   const item = session(id); if (!item) return;
   const form = document.createElement('form'); form.className = 'session-rename-form';
   const input = document.createElement('input'); input.value = item.title; input.maxLength = 512;
-  input.setAttribute('aria-label','会话名称'); input.autocomplete = 'off';
+  input.setAttribute('aria-label',t('app.session_name')); input.autocomplete = 'off';
   const error = document.createElement('small'); error.className = 'rename-error'; error.setAttribute('role','status');
-  const save = button('✓','保存名称',() => form.requestSubmit());
-  const cancel = button('×','取消重命名',cancelRename);
+  const save = button('✓',t('app.save_name'),() => form.requestSubmit());
+  const cancel = button('×',t('app.cancel_rename'),cancelRename);
   form.append(input,save,cancel,error);
   renameEditor = {id,form,input,error,saving:false};
   form.addEventListener('submit',event => {event.preventDefault(); saveRename();});
@@ -73,18 +73,18 @@ async function saveRename() {
   const title = editor.input.value.trim();
   // Workspace validation counts UTF-8 bytes, not JavaScript code units.
   if (!title || new TextEncoder().encode(title).length > 512) {
-    editor.error.textContent = title ? '名称过长，请控制在 512 字节以内（约 170 个汉字）。' : '请输入会话名称。'; return;
+    editor.error.textContent = title ? t('app.name_is_too_long_use_at_most_512_utf_8_bytes') : t('app.enter_a_session_name'); return;
   }
   const item = session(editor.id); if (!item) {cancelRename(); return;}
   const previous = item.title; const autoTitle = state(item.id).autoTitle;
-  editor.saving = true; editor.error.textContent = '正在保存…';
+  editor.saving = true; editor.error.textContent = t('app.saving');
   editor.form.querySelectorAll('input,button').forEach(n => {n.disabled = true;});
   item.title = title; state(item.id).autoTitle = false;
   try {
     await persist(); renameEditor = null;
   } catch (error) {
     item.title = previous; state(item.id).autoTitle = autoTitle;
-    editor.error.textContent = `名称未保存：${error}。请重试。`;
+    editor.error.textContent = t('app.name_was_not_saved_value_please_retry',{v0:(errorText(error))});
   } finally {
     editor.saving = false; editor.form.querySelectorAll('input,button').forEach(n => {n.disabled = false;});
     renderNavigation();
@@ -100,39 +100,47 @@ function renderNavigation() {
   $('session-list').replaceChildren();
   for (const s of workspace.sessions) {
     const row = document.createElement('div'); row.className = 'session-row';
-    const open = button(s.title, `打开会话：${s.title}`, () => selectTab(s.id)); open.dataset.page = 'files'; open.className = 'session-name';
+    const open = button(s.title, t('app.open_session_value',{v0:(s.title)}), () => selectTab(s.id)); open.dataset.page = 'files'; open.className = 'session-name';
     if (s.id === workspace.active) open.setAttribute('aria-current','page');
-    const rename = button('✎',`重命名会话：${s.title}`,() => startRename(s.id)); rename.className = 'session-rename'; rename.dataset.renameId = s.id;
+    const rename = button('✎',t('app.rename_session_value',{v0:(s.title)}),() => startRename(s.id)); rename.className = 'session-rename'; rename.dataset.renameId = s.id;
     if (renameEditor?.id === s.id) row.append(renameEditor.form);
     else row.append(open,rename);
     $('session-list').append(row);
   }
   $('workspace-tabs').replaceChildren();
   for (const id of workspace.tabs) {
-    const title = id === 'home' ? '概览' : id === 'settings' ? '设置' : session(id)?.title || '会话';
+    const title = id === 'home' ? t('app.overview') : id === 'settings' ? t('app.settings') : session(id)?.title || t('app.session');
     const tab = document.createElement('div'); tab.className = 'workspace-tab';
-    const open = button(title,`切换到${title}`,() => selectTab(id)); open.setAttribute('role','tab'); open.setAttribute('aria-selected',String(id === workspace.active));
+    const open = button(title,t('app.switch_to_value',{v0:(title)}),() => selectTab(id)); open.setAttribute('role','tab'); open.setAttribute('aria-selected',String(id === workspace.active));
     if (id === workspace.active) tab.classList.add('selected');
     tab.append(open);
-    if (id !== 'home') { const close = button('×',`关闭标签：${title}`,() => closeTab(id)); close.className = 'tab-close'; tab.append(close); }
+    if (id !== 'home') { const close = button('×',t('app.close_tab_value',{v0:(title)}),() => closeTab(id)); close.className = 'tab-close'; tab.append(close); }
     $('workspace-tabs').append(tab);
   }
   if (editingFocus) focusedNode.focus({preventScroll:true});
   if (focused && !editingFocus) { const target = [...document.querySelectorAll('button[aria-label]')].find(n => n.getAttribute('aria-label') === focused); target?.focus({preventScroll:true}); }
 }
+function receiptSummary(m) {
+  if(m.error) return t('app.operation_incomplete_details');
+  if(/更新失败|服务不可用|身份核验失败|维护线程已停止|Update failed|Service unavailable|identity check failed|Maintenance stopped/.test(m.text)) return t('app.some_indexes_are_unavailable_details');
+  if(/覆盖不完整|结果不完整|已截断|非全盘|incomplete|truncated|not whole-volume/.test(m.text)) return t('app.search_coverage_is_incomplete_details');
+  if(m.text.startsWith('搜索结果（历史记录') || m.text.startsWith('Search results (history')) return t('app.search_record_value_items_details',{v0:(Math.max(0,m.text.split('\n').length-1))});
+  if(/系统已接受打开请求|system accepted the open request|Windows accepted the open request/.test(m.text)) return t('app.open_request_handed_to_windows_details');
+  return t('app.local_search_and_action_record_details');
+}
 function renderMessage(m) {
-  const block = document.createElement('div'); block.className = `message ${m.role}${m.error ? ' error' : ''}`;
-  const speaker = document.createElement('div'); speaker.className = 'speaker'; speaker.textContent = m.role === 'user' ? '你' : m.role === 'receipt' ? '本地回执' : 'DAO';
-  const body = document.createElement('div'); body.textContent = m.text; block.append(speaker,body); $('conversation').append(block);
+  const block = document.createElement(m.role==='receipt' ? 'details' : 'div'); block.className = `message ${m.role}${m.error ? ' error' : ''}`;
+  const speaker = document.createElement(m.role==='receipt' ? 'summary' : 'div'); speaker.className = 'speaker'; speaker.textContent = m.role === 'user' ? t('app.you') : m.role === 'receipt' ? receiptSummary(m) : 'DAO';
+  const body = document.createElement('div'); body.className='message-body';body.textContent = m.text; block.append(speaker,body); $('conversation').append(block);
 }
 function candidates(items) {
-  $('candidate-list').replaceChildren(); $('candidate-panel').hidden = !items.length; $('candidate-count').textContent = `${items.length} 项`;
+  $('candidate-list').replaceChildren(); $('candidate-panel').hidden = !items.length; $('candidate-count').textContent = t('app.value_items',{v0:(items.length)});
   for (const item of items) {
     const row = document.createElement('div'); row.className = 'file-row';
     const detail = document.createElement('div'); detail.className = 'file-detail';
     const name = document.createElement('div'); name.className = 'file-name'; name.textContent = nameOf(item.path);
     const path = document.createElement('div'); path.className = 'file-path'; path.textContent = pathText(item.path); detail.append(name,path);
-    const open = button('打开 ↗',`打开 ${nameOf(item.path)}`,() => run('open',item.id)); open.disabled = busy;
+    const open = button(t('app.open'),t('app.open_value',{v0:(nameOf(item.path))}),() => run('open-selected',item.id)); open.disabled = busy;
     row.append(detail,open); $('candidate-list').append(row);
   }
 }
@@ -141,7 +149,7 @@ function renderCurrent() {
   currentPage = s ? 'files' : workspace.active;
   for (const name of ['home','files','settings']) $(`page-${name}`).hidden = name !== currentPage;
   $('entry-footer').hidden = currentPage === 'settings';
-  $('page-title').textContent = s?.title || (currentPage === 'home' ? '概览' : '设置');
+  $('page-title').textContent = s?.title || (currentPage === 'home' ? t('app.overview') : t('app.settings'));
   document.querySelectorAll('.message').forEach(n => n.remove());
   for (const m of s?.messages || []) renderMessage(m);
   $('welcome').hidden = Boolean(s?.messages.length);
@@ -149,7 +157,7 @@ function renderCurrent() {
   candidates(st?.items || []);
   $('input').value = s?.draft ?? (currentPage === 'home' ? workspace.home_draft : '');
   renderedTab = workspace.active;
-  $('activity').textContent = st?.activity || (activeRequest ? '另一会话正在处理，可切换查看或停止。' : '准备就绪');
+  $('activity').textContent = builtinText(st?.activity) || (activeRequest ? t('app.another_session_is_running_you_can_switch_to_it_or_stop_it') : t('app.ready'));
   const c = st?.confirmation;
   $('confirmation').hidden = !c;
   if (c) { $('confirm-name').textContent = nameOf(c.object.path); $('confirm-path').textContent = pathText(c.object.path); }
@@ -170,8 +178,9 @@ function setBusy(value) {
   $('send').disabled = value || !ready; $('input').disabled = !ready;
   $('reset').disabled = !ready;
   $('cancel').hidden = !value || applicationBusy; $('settings-cancel').hidden = !value || applicationBusy;
-  document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home,#refresh-profile').forEach(n => {n.disabled = value;});
-  document.querySelectorAll('.file-row button').forEach(n => {n.disabled = value;});
+  document.querySelectorAll('.settings-controls input,.settings-controls select,.settings-controls textarea,.settings-controls button,#refresh-home,#explain-home,#refresh-profile').forEach(n => {if (!n.closest('#settings-inventory')) n.disabled = value;});
+  document.querySelectorAll('.file-row button').forEach(n => {if (!n.closest('#settings-inventory')) n.disabled = value;});
+  document.querySelectorAll('.process-end').forEach(n => {n.disabled=value || !n.dataset.terminationRef;});
 }
 function message(text, role = 'assistant', error = false, id = workspace.active) {
   const s = session(id); if (!s) return;
@@ -184,21 +193,37 @@ function invalidateContexts() {
   for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.confirmation = null; st.contextLost = true; }
   renderCurrent();
 }
+function applySearchReceipt(value,request) {
+  const key=value.receipt_id || JSON.stringify({
+    source:value.source,items:(value.items || []).map(item=>pathText(item.path)),
+    coverage_note:value.coverage_note,skipped:value.skipped,truncated:value.truncated,
+    index_receipt:value.index_receipt,roots:value.roots,page:value.page,has_more:value.has_more,
+  });
+  request.seenSearchReceipts ||= new Set();
+  if (request.seenSearchReceipts.has(key) || request.stopping) return;
+  request.seenSearchReceipts.add(key);
+  const st=state(request.sessionId);
+  st.items=value.items || [];
+  if (value.coverage_note) message(localBuiltin(value.coverage_note) + (value.skipped ? t('app.skipped_value_items',{v0:(value.skipped)}) : '') + (value.truncated ? (value.source==='windows_service' ? t('app.index_coverage_is_incomplete') : t('app.scan_was_truncated_results_are_incomplete')) : ''),'receipt',false,request.sessionId);
+  if (value.index_receipt) {
+    const lines=(value.index_receipt.volumes || []).map(indexVolumeText);
+    lines.push(...(value.index_receipt.reasons || []).map(indexReason));
+    if(lines.length) message(lines.join('\n'),'receipt',false,request.sessionId);
+  }
+  if (st.items.length) message(t('app.search_results_history_search_again_before_acting') + st.items.map(item => pathText(item.path)).join('\n'),'receipt',false,request.sessionId);
+}
 function onEvent(event, request) {
   if (activeRequest !== request || !session(request.sessionId) || event.session_id !== request.sessionId || event.execution_id !== request.id) return;
   const st = state(request.sessionId);
-  if (event.kind === 'progress') st.activity = event.text;
+  if (event.kind === 'progress') st.activity = localBuiltin(event.text);
   if (event.kind === 'context_reset') {
     for (const item of event.configuration_changed ? workspace.sessions : [session(request.sessionId)]) {
       const previous = state(item.id); previous.items = []; previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
     }
   }
-  if (event.kind === 'result' && event.capability === 'file_search') {
-    st.items = event.value.items || [];
-    if (st.items.length) message('搜索结果（历史记录；操作前请重新搜索）：\n' + st.items.map(item => pathText(item.path)).join('\n'),'receipt',false,request.sessionId);
-  }
-  if (event.kind === 'result' && event.capability === 'file_open') message(event.value.message || '打开请求已处理。','receipt',false,request.sessionId);
-  if (event.kind === 'confirm_open' && !request.stopping) { st.confirmation = {...event,executionId:request.id}; st.activity = '等待你的确认…'; }
+  if (event.kind === 'result' && event.capability === 'file_search') applySearchReceipt(event.value,request);
+  if (event.kind === 'result' && event.capability === 'file_open') message(localBuiltin(event.value.message) || t('app.open_request_processed'),'receipt',false,request.sessionId);
+  if (event.kind === 'confirm_open' && !request.stopping) { st.confirmation = {...event,executionId:request.id}; st.activity = t('app.waiting_for_your_confirmation'); }
   if (event.kind === 'confirmation_closed' && st.confirmation?.request_id === event.request_id) st.confirmation = null;
   if (workspace.active === request.sessionId) { captureDraft(); renderCurrent(); }
 }
@@ -208,8 +233,8 @@ async function newSession() {
   creating = true;
   try {
     const id = crypto.randomUUID(); if (api) await api.invoke('register_session',{sessionId:id});
-    captureDraft(); workspace.sessions.push({id,title:'新会话',draft:'',messages:[]}); state(id).autoTitle = true; selectTab(id); $('input').focus(); return id;
-  } catch (error) { persistenceNotice(String(error)); return null; }
+    captureDraft(); workspace.sessions.push({id,title:t('app.new_session'),draft:'',messages:[]}); state(id).autoTitle = true; selectTab(id); $('input').focus(); return id;
+  } catch (error) { persistenceNotice(errorText(error)); return null; }
   finally { creating = false; }
 }
 async function run(kind,input = '') {
@@ -220,23 +245,25 @@ async function run(kind,input = '') {
   const request = {id:crypto.randomUUID(),sessionId:id,stopping:false}; activeRequest = request;
   setBusy(true); closeConfirmation(id);
   if (kind === 'say' || kind === 'search') { message(input,'user',false,id); if (state(id).autoTitle) { s.title = input.slice(0,60); state(id).autoTitle = false; } }
-  if (kind === 'explain') message('解释这次电脑资源快照','user',false,id);
-  state(id).activity = '正在处理…'; renderCurrent();
+  if (kind === 'explain') message(t('app.explain_this_computer_resource_snapshot'),'user',false,id);
+  state(id).activity = t('app.working'); renderCurrent();
   const channel = new api.Channel(); channel.onmessage = event => onEvent(event,request);
   request.done = (async () => {
     try {
       const reply = await api.invoke('perform',{sessionId:id,requestId:request.id,kind,input,onEvent:channel});
       if (activeRequest !== request || !session(id)) return;
-      if (kind !== 'open' || reply.error) message(reply.message,'assistant',reply.error,id);
+      if (reply.search_receipt) applySearchReceipt(reply.search_receipt,request);
+      if (!['open','open-selected'].includes(kind) || reply.error) message(reply.error ? errorText(reply.message) : reply.message,'assistant',reply.error,id);
       state(id).items = request.stopping ? [] : reply.items;
-      state(id).activity = request.stopping ? '已停止' : reply.error ? '这次没有完成，可以调整后再试。' : '准备就绪';
-    } catch (error) { message(String(error),'assistant',true,id); state(id).activity = '请求未完成'; }
+      state(id).activity = request.stopping ? t('app.stopped') : reply.error ? t('app.this_request_did_not_complete_adjust_it_and_try_again') : t('app.ready');
+      return reply;
+    } catch (error) { message(errorText(error),'assistant',true,id); state(id).activity = t('app.request_incomplete'); }
     finally {
       closeConfirmation(id);
       if (activeRequest === request) { activeRequest = null; setBusy(false); captureDraft(); renderCurrent(); saveSoon(); }
     }
   })();
-  await request.done;
+  return await request.done;
 }
 async function stopRequest() {
   const request = activeRequest;
@@ -252,7 +279,7 @@ async function answer(approved) {
   if (!c || !activeRequest || activeRequest.sessionId !== id || activeRequest.id !== c.executionId || activeRequest.stopping) return;
   c.answering = true; renderCurrent();
   try { await api.invoke('confirm_open',{sessionId:id,executionId:c.executionId,requestId:c.request_id,approved}); }
-  catch (error) { message(String(error),'assistant',true,id); }
+  catch (error) { message(errorText(error),'assistant',true,id); }
   finally { closeConfirmation(id); }
 }
 let decision = null;
@@ -272,7 +299,7 @@ document.addEventListener('keydown',event => {
 async function closeTab(id) {
   if (id === 'home' || mutatingWorkspace) return;
   const executing = activeRequest?.sessionId === id;
-  if (executing && !await ask('停止当前请求并关闭标签？')) return;
+  if (executing && !await ask(t('app.stop_the_current_request_and_close_this_tab'))) return;
   try {
     if (activeRequest?.sessionId === id) await stopRequest();
     mutatingWorkspace = true; document.querySelector('.shell').inert = true;
@@ -288,22 +315,23 @@ async function closeTab(id) {
       renderCurrent(); throw error;
     }
     renderCurrent();
-  } catch (error) { persistenceNotice(String(error)); }
+  } catch (error) { persistenceNotice(errorText(error)); }
   finally { mutatingWorkspace = false; document.querySelector('.shell').inert = false; }
 }
 $('composer').addEventListener('submit',event => { event.preventDefault(); const input = $('input').value.trim(); if (input) run('say',input); });
 $('input').addEventListener('input',() => { captureDraft(); saveSoon(); });
 $('input').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); $('composer').requestSubmit(); } });
 $('reset').addEventListener('click',newSession);
-$('cancel').addEventListener('click',() => stopRequest().catch(error => persistenceNotice(String(error))));
+$('cancel').addEventListener('click',() => stopRequest().catch(error => persistenceNotice(errorText(error))));
 $('settings-cancel').addEventListener('click',() => $('cancel').click());
 $('approve').addEventListener('click',() => answer(true)); $('reject').addEventListener('click',() => answer(false));
 $('retry-save').addEventListener('click',saveSoon);
 document.querySelectorAll('[data-prompt]').forEach(b => b.addEventListener('click',() => { $('input').value = b.dataset.prompt; captureDraft(); saveSoon(); $('input').focus(); }));
 async function restoreWorkspace() {
+  await languageReady;
   if (api) {
     try { workspace = await api.invoke('load_workspace'); for (const s of workspace.sessions) state(s.id).contextLost = true; }
-    catch (error) { persistenceBlocked = true; persistenceNotice(`恢复失败：${error}。原文件保留；本次内容不会保存。请关闭应用，备份并移走配置目录中的 workspace.json 后重启。`); }
+    catch (error) { persistenceBlocked = true; persistenceNotice(t('app.restore_failed_value_the_original_file_is_preserved_this_session',{v0:(errorText(error))})); }
   }
   // Keep legacy workspace files compatible while the collapse control is deferred.
   workspace.collapsed = false;
@@ -313,17 +341,19 @@ async function restoreWorkspace() {
   await init();
 }
 async function init() {
-  if (!api) { $('activity').textContent = '界面预览：文件与模型能力仅在桌面应用中可用。'; $('model-label').textContent = '静态界面预览'; setBusy(true); $('cancel').hidden = true; return; }
+  await languageReady;
+  if (!api) { $('activity').textContent = t('app.ui_preview_file_and_model_features_are_available_only_in_the_des'); $('model-label').textContent = t('app.static_ui_preview'); setBusy(true); $('cancel').hidden = true; return; }
   try {
     const info = await api.invoke('session_info');
-    $('model-label').textContent = info.model_error ? '尚未连接模型' : info.model;
+    $('model-label').textContent = info.model_error ? t('app.no_model_connected') : info.model;
     $('model-dot').classList.toggle('offline', Boolean(info.model_error));
     const notes = [];
-    if (info.model_error) notes.push(info.model_error);
-    if (!info.roots.length && info.access_mode !== 'full') notes.push('还没有查找目录。请在设置 → 访问权限中选择目录。');
+    if(languageDetectionFailed)notes.push(t('language.detection_error'));
+    if (info.model_error) notes.push(localBuiltin(info.model_error));
+    if (!info.roots.length && info.access_mode !== 'full') notes.push(t('app.no_search_folders_yet_choose_folders_in_settings_access'));
     $('config-notice').hidden = !notes.length;
     if (notes.length) { $('config-notice').textContent = notes.join('\n'); $('config-notice').hidden = false; }
-  } catch (error) { $('config-notice').textContent = String(error); $('config-notice').hidden = false; $('activity').textContent = '配置未能加载，请修正后重启入口。'; }
+  } catch (error) { $('config-notice').textContent = errorText(error); $('config-notice').hidden = false; $('activity').textContent = t('app.configuration_could_not_be_loaded_correct_it_and_restart_the_app'); }
 }
 
 
@@ -337,11 +367,13 @@ if (window.__TAURI__?.event) window.__TAURI__.event.listen('workspace-close-requ
     if (activeRequest) await stopRequest();
     captureDraft();
     if (persistenceBlocked) {
-      if (!await ask('工作区恢复失败，本次内容未保存。仍要退出？')) return;
+      if (!await ask(t('app.workspace_restore_failed_this_session_was_not_saved_exit_anyway'))) return;
     } else {
       try { await persist(); }
-      catch { if (!await ask('保存失败，本次更改可能丢失。仍要退出？')) return; }
+      catch { if (!await ask(t('app.save_failed_changes_may_be_lost_exit_anyway'))) return; }
     }
     await api.invoke('finish_close');
   } finally { closingWindow = false; }
-}).catch(error => persistenceNotice(`无法监听退出事件：${error}`));
+}).catch(error => persistenceNotice(t('app.could_not_listen_for_window_close_events_value',{v0:(errorText(error))})));
+
+document.addEventListener('languagechange',()=>{ if(!ready)return; captureDraft();renderCurrent();init(); });

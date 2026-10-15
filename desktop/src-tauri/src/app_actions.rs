@@ -19,6 +19,26 @@ pub struct Catalog {
 }
 const MISSING: &str = "未找到唯一同名、无参数的本地开始菜单程序入口，请从 Windows 开始菜单操作";
 impl Catalog {
+    pub fn running_targets(&self) -> HashMap<String, PathBuf> {
+        let mut counts = HashMap::new();
+        for target in self.targets.values().flatten() {
+            *counts
+                .entry(target.exe.to_string_lossy().to_lowercase())
+                .or_insert(0usize) += 1;
+        }
+        self.targets
+            .iter()
+            .filter_map(|(id, target)| {
+                let target = target.as_ref()?;
+                if counts.get(&target.exe.to_string_lossy().to_lowercase()) != Some(&1) {
+                    return None;
+                }
+                let _link = pin(&target.link, &target.link_identity).ok()?;
+                let _exe = pin(&target.exe, &target.identity).ok()?;
+                Some((id.clone(), target.exe.clone()))
+            })
+            .collect()
+    }
     pub fn refresh(&mut self, snapshot: &mut Value) {
         self.bind(snapshot, discover().unwrap_or_default());
     }
@@ -172,6 +192,21 @@ mod tests {
         Catalog {
             targets: HashMap::from([("fixture".into(), t)]),
         }
+    }
+    #[test]
+    fn running_association_requires_unique_pinned_exact_shortcut_target() {
+        let (_dir, target) = fixture();
+        let unique = catalog(Some(target.clone()));
+        assert_eq!(unique.running_targets().get("fixture"), Some(&target.exe));
+        let shared = Catalog {
+            targets: HashMap::from([
+                ("a".into(), Some(target.clone())),
+                ("b".into(), Some(target.clone())),
+            ]),
+        };
+        assert!(shared.running_targets().is_empty());
+        std::fs::write(&target.link, "replaced synthetic shortcut").unwrap();
+        assert!(unique.running_targets().is_empty());
     }
     #[test]
     fn rejects_unsafe_executable_names_and_paths() {

@@ -20,6 +20,7 @@ pub struct Dialogue {
     client: ModelClient,
     messages: Vec<Value>,
     tools: Vec<Value>,
+    response_language: crate::localization::Language,
 }
 impl Dialogue {
     pub fn new(config: &ModelConfig, runtime: &Runtime) -> Result<Self> {
@@ -46,12 +47,24 @@ impl Dialogue {
             client,
             messages: vec![json!({"role":"system","content":system})],
             tools: definitions(),
+            response_language: crate::localization::Language::Chinese,
         })
     }
     /// The desktop file entry is intentionally narrower than the CLI.
     /// Enforced again before dispatch, even if a model invents an unavailable tool.
     pub fn new_file_entry(config: &ModelConfig, runtime: &Runtime) -> Result<Self> {
+        Self::new_file_entry_language(config, runtime, crate::localization::Language::Chinese)
+    }
+    pub fn new_file_entry_language(
+        config: &ModelConfig,
+        runtime: &Runtime,
+        language: crate::localization::Language,
+    ) -> Result<Self> {
         let mut dialogue = Self::new(config, runtime)?;
+        let system = dialogue.messages[0]["content"].as_str().unwrap();
+        dialogue.response_language = language;
+        // Replace the original output-language rule, preserving all capability and authorization facts.
+        dialogue.messages[0]["content"] = json!(system.replacen("使用中文，简洁。", language.choose("默认使用简体中文，简洁；用户明确指定其他回复语言时遵从用户。", "Respond concisely in English by default. If the user explicitly requests another response language, follow that request."),1));
         dialogue.tools.retain(|tool| {
             matches!(
                 tool["function"]["name"].as_str(),
@@ -66,6 +79,37 @@ impl Dialogue {
     }
     pub fn reset(&mut self) {
         self.messages.truncate(1);
+    }
+    pub fn set_global_name_discovery(&mut self, enabled: bool) {
+        let base = self.messages[0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .split("\n[全盘名称发现模式]")
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let description = if enabled {
+            "全盘名称发现模式：本段替代前述搜索优先级及搜索目录限制；前述只读目录仍限制后续文件操作与目录补充搜索。query 单个文件名关键词且默认 relevance、无其他筛选、第一页可查询服务支持的在线卷，名称发现独立于操作目录 Scope。terms 仍匹配相对路径，不得改成文件名 AND/OR；terms、路径、时间、大小、类型、其他排序或后续页只在回执列出的授权兼容目录内有界补充。优先 query 仅适用于用户确实只要求文件名；不得为了加速丢弃用户的路径/时间/大小/其他条件。搜索结果不是读取正文、查看元数据或打开授权，后续动作仍由 Scope 和本地确认执行。没有兼容目录时解释限制，不要求为全盘名称发现登记目录。"
+        } else {
+            ""
+        };
+        self.messages[0]["content"] = json!(if enabled {
+            format!("{base}\n[全盘名称发现模式]\n{description}")
+        } else {
+            base
+        });
+        for tool in &mut self.tools {
+            if tool["function"]["name"] == "file_search" {
+                if enabled {
+                    tool["function"]["description"] = json!(description);
+                } else if let Some(original) = definitions()
+                    .into_iter()
+                    .find(|value| value["function"]["name"] == "file_search")
+                {
+                    tool["function"]["description"] = original["function"]["description"].clone();
+                }
+            }
+        }
     }
     pub fn observe_local(&mut self, capability: &str, result: &Value) {
         self.messages.push(json!({"role":"assistant","content":format!(
@@ -120,9 +164,14 @@ impl Dialogue {
                 })?;
             self.messages.push(response.replay());
             if response.tool_calls.is_empty() {
-                return Ok(response
-                    .content
-                    .unwrap_or_else(|| "模型没有返回文字；可以继续提问或使用 /search。".into()));
+                return Ok(response.content.unwrap_or_else(|| {
+                    self.response_language
+                        .choose(
+                            "模型没有返回文字；可以继续提问或使用 /search。",
+                            "The model returned no text. Ask again or search by file name.",
+                        )
+                        .into()
+                }));
             }
             for call in response.tool_calls {
                 let result = if !self
@@ -158,7 +207,7 @@ impl Dialogue {
             }
             if used >= TOOL_LIMIT {
                 return Ok(
-                    "本轮已达到 12 次工具调用上限。实际结果见本地回执；请给出下一步指令。".into(),
+                    self.response_language.choose("本轮已达到 12 次工具调用上限。实际结果见本地回执；请给出下一步指令。", "The 12-tool-call limit was reached. See local receipts for actual results and give the next instruction.").into(),
                 );
             }
         }

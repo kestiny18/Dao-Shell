@@ -18,15 +18,19 @@ async function fixture(options = {}) {
 
   w.__TAURI__ = { event:{listen:async(name,handler)=>{windowEvents.set(name,handler);}}, core:{ Channel:class {}, invoke:async (command, args) => {
     calls.push({command,args:clone(args || {})});
+    if(command==='language_info') return {effective_language:options.languageFailure ? (()=>{throw Error('language detection failed');})() : current.config.ui_language==='en' ? 'en' : current.config.ui_language==='zh-CN' ? 'zh-CN' : options.systemLanguage || 'zh-CN'};
+    if(command==='index_service_command') return options.indexService ? options.indexService(args) : {state:'not_installed',enabled:false,payload_ready:false,volumes:[]};
     if (command === 'load_workspace') { if (options.loadFailure) throw Error('broken workspace'); return clone(savedWorkspace); }
     if (command === 'save_workspace') { if (saveGate) await saveGate; if (saveFailure) throw Error('disk full'); savedWorkspace = clone(args.workspace); return; }
     if (['register_session','finish_close'].includes(command)) return;
     if (command === 'session_info') return { roots:current.config.read_roots, model:options.noModel ? null : 'fixture-model', model_error:options.noModel ? '未配置模型' : null, access_mode:current.config.access_mode };
-    if (command === 'get_settings') return clone(current);
+    if (command === 'get_settings') return {...clone(current),effective_language:current.config.ui_language==='en'?'en':current.config.ui_language==='zh-CN'?'zh-CN':options.systemLanguage || 'zh-CN'};
+    if (command === 'inventory_command') return options.inventory ? options.inventory(args) : [];
     if (command === 'choose_directory') { if(options.directoryError) throw Error('picker unavailable'); return options.directory ?? null; }
-    if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return clone(current); }
+    if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return {...clone(current),effective_language:current.config.ui_language==='en'?'en':current.config.ui_language==='zh-CN'?'zh-CN':options.systemLanguage || 'zh-CN'}; }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
     if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
+    if (command === 'process_action' && options.processAction) return options.processAction(args);
     if (command === 'computer_profile') { if (options.profile) return options.profile(); return {brand:'Fixture',model:null,os:'Windows fixture',cpus:['CPU A'],memory_bytes:8589934592,graphics:['GPU A','GPU B'],volumes:[1073741824,2147483648],observed_at:'fixture time',host:'SECRET_HOST',serial:'SECRET_SERIAL',mount:'SECRET_PATH'}; }
     if (command === 'computer_overview' && options.overview) return options.overview();
     if (command === 'computer_overview') return {system:{cpu_percent:12.5,memory_used_bytes:1024,memory_total_bytes:2048,memory_available_bytes:1024,disks:[{mount:'C:\\',total_bytes:4096,available_bytes:2048}]},device:{host:'Fixture computer',os:'Fixture OS',uptime_seconds:3600,architecture:'x86_64'},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:'Fixture counters'},applications:{items:[{name:'<img src=x onerror=alert(1)>',version:'1'}],available:true,partial:true,limits:'Partial fixture'}};
@@ -34,13 +38,15 @@ async function fixture(options = {}) {
       const emit = event => args.onEvent.onmessage({...event,session_id:args.sessionId,execution_id:args.requestId}); events.push(emit);
       if (args.input === 'slow') return new Promise((resolve) => { pending = resolve; });
       const items = args.input === 'absent' ? [] : [file];
+      if(options.searchReceipt) return {message:'fixture response',error:false,items,search_receipt:{items,...options.searchReceipt}};
+      if(options.delayedSearchReceipt) return {message:'fixture response',error:false,items,search_receipt:{items,source:'inventory',coverage_note:'已记录目录：仍可能有延迟',observed_at:'fixture'}};
       emit({kind:'result',capability:'file_search',value:{items}});
       return {message:'fixture response',error:false,items};
     }
     if (command === 'cancel') { if (!options.deferCancel) pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['app.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['i18n.js','app.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -515,7 +521,7 @@ test('application failure restores controls and menu routes admin and location e
   }
 });
 
-test('resource details preserve one sample across sorting, high/low/unknown and vanished processes', async (t) => {
+test('resource details show both rankings from one sample with high low unknown and vanished processes', async (t) => {
   const f=await fixture({noModel:true});t.after(()=>f.dom.window.close());
   const snapshot=clone(f.w.eval('homeSnapshot'));
   const heavy={name:'CPU fixture <script>',pid:10,cpu_percent_total:95,memory_bytes:1024};
@@ -525,15 +531,84 @@ test('resource details preserve one sample across sorting, high/low/unknown and 
   f.w.renderOverview(snapshot);
   assert.match(f.$('resource-sample').textContent,/0.72 秒/);
   assert.match(f.$('resource-coverage').textContent,/2 个进程/);
-  assert.match(f.$('resource-processes').rows[0].textContent,/CPU fixture.*95.0%/);
-  assert.match(f.$('resource-processes').rows[1].textContent,/<0.1%/);
-  assert.match(f.$('resource-processes').rows[2].textContent,/未知未知/);
-  assert.equal(f.$('resource-processes').querySelector('script'),null);
-  f.w.document.querySelector('[data-process-sort="memory"]').click();
-  assert.match(f.$('resource-processes').rows[0].textContent,/Memory fixture/);
+  assert.match(f.$('resource-cpu-processes').rows[0].textContent,/CPU fixture.*95.0%/);
+  assert.match(f.$('resource-cpu-processes').rows[1].textContent,/<0.1%/);
+  assert.match(f.$('resource-cpu-processes').rows[2].textContent,/未知未知/);
+  assert.equal(f.$('resource-cpu-processes').querySelector('script'),null);
+  assert.match(f.$('resource-memory-processes').rows[0].textContent,/Memory fixture/);
+  assert.equal(f.$('resource-memory-processes').rows.length,3);
+  assert.equal(f.w.document.querySelector('[data-process-sort]'),null);
+  assert.match(f.$('resource-coverage').textContent,/来自同一次采样/);
   assert.equal(f.calls.filter(c=>c.command==='computer_overview').length,1);
   assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
   assert.ok(!JSON.stringify(f.saved()).includes('CPU fixture'));
+});
+
+test('overview memory percentage retains capacities and never invents a percentage for missing or inconsistent totals',async(t)=>{
+ const f=await fixture();t.after(()=>f.dom.window.close());
+ const snapshot=clone(f.w.eval('homeSnapshot'));
+ Object.assign(snapshot.system,{memory_used_bytes:72*1024**3,memory_total_bytes:100*1024**3,memory_available_bytes:28*1024**3});
+ f.w.renderOverview(snapshot);
+ assert.equal(f.$('memory-value').textContent,'72%');assert.match(f.$('memory-detail').textContent,/已用 72.0 GiB \/ 总计 100.0 GiB/);
+ for(const [used,total] of [[null,100],[10,null],[0,0],[110,100]]) {
+  snapshot.system.memory_used_bytes=used;snapshot.system.memory_total_bytes=total;f.w.renderOverview(snapshot);
+  assert.equal(f.$('memory-value').textContent,'暂不可用');
+ }
+ snapshot.system.memory_used_bytes=0;snapshot.system.memory_total_bytes=100;f.w.renderOverview(snapshot);assert.equal(f.$('memory-value').textContent,'0%');
+ snapshot.system.disks=[{mount:'C:\\',total_bytes:100,available_bytes:null}];f.w.renderOverview(snapshot);
+ assert.equal(f.$('disks').querySelector('progress').hasAttribute('value'),false);assert.equal(f.$('disks').querySelector('progress').getAttribute('aria-valuetext'),'容量占用未知');
+});
+
+test('overview cards expand focus and scroll to the sampled resource and application sections without requests',async(t)=>{
+ const f=await fixture();t.after(()=>f.dom.window.close());
+ const snapshot=clone(f.w.eval('homeSnapshot'));
+ snapshot.applications.items=[{name:'Running fixture',running:true},{name:'Unknown fixture',running:null}];snapshot.matched_processes=800;
+ f.w.renderOverview(snapshot);
+ assert.equal(f.$('apps-value').textContent,'2 项记录');assert.match(f.$('apps-detail').textContent,/1 个已知运行应用/);assert.doesNotMatch(f.$('apps-detail').textContent,/800|进程/);
+ const scrolled=[];f.w.HTMLElement.prototype.scrollIntoView=function(){scrolled.push(this.id);};
+ const before=f.calls.length;
+ for(const button of f.w.document.querySelectorAll('[data-overview-target]')) {
+  assert.equal(button.tagName,'BUTTON');const target=f.$(button.dataset.overviewTarget);target.open=false;
+  button.click();assert.equal(target.open,true);assert.equal(button.getAttribute('aria-expanded'),'true');assert.equal(f.w.document.activeElement,target.querySelector('summary'));
+  assert.equal(scrolled.at(-1),target.id);
+ }
+ assert.equal(f.calls.length,before);
+ f.$('resource-details').open=false;await f.tick();
+ for(const button of f.w.document.querySelectorAll('[data-overview-target="resource-details"]')) assert.equal(button.getAttribute('aria-expanded'),'false');
+ snapshot.applications.available=false;f.w.renderOverview(snapshot);assert.equal(f.$('apps-value').textContent,'暂不可用');assert.doesNotMatch(f.$('apps-detail').textContent,/0 个/);
+});
+
+test('process and application termination require one local frozen confirmation and keep partial results out of history',async(t)=>{
+ const f=await fixture({processAction:async args=>args.action==='prepare'?{confirmation_id:'opaque-confirmation',count:2,processes:[{pid:10,name:'Fixture.exe'},{pid:11,name:'Fixture.exe'}],warning:'可能丢失未保存内容，只结束列出的实例'}:{state:args.confirmed?'partial':'cancelled',message:args.confirmed?'已退出 1/2，仍在结束 1。请检查状态。':'已取消，未结束进程。'}});t.after(()=>f.dom.window.close());
+ const snapshot=clone(f.w.eval('homeSnapshot'));
+ snapshot.process_rankings={cpu:[{pid:10,name:'Fixture',cpu_percent_total:1,memory_bytes:1,termination_ref:'opaque-target'}],memory:[]};
+ snapshot.applications.items=[{name:'Fixture',running:true,running_instances:2,termination_ref:'opaque-app'}];f.w.renderOverview(snapshot);
+ f.$('resource-cpu-processes').querySelector('button').click();await f.tick();
+ assert.match(f.$('decision-text').textContent,/2 个已确认进程.*PID 10.*PID 11.*丢失未保存/);
+ assert.equal(f.calls.filter(c=>c.command==='process_action'&&c.args.action==='resolve').length,0);
+ f.$('decision-no').click();await f.tick();
+ assert.deepEqual(f.calls.filter(c=>c.command==='process_action').at(-1).args,{action:'resolve',reference:'opaque-confirmation',confirmed:false});
+ assert.match(f.$('process-action-status').textContent,/已取消/);
+ const appButton=f.$('applications').querySelector('.process-end');appButton.click();appButton.dispatchEvent(new f.w.MouseEvent('dblclick',{bubbles:true}));await f.tick();
+ assert.equal(f.calls.filter(c=>c.command==='application_action').length,0);
+ f.$('decision-yes').click();await f.tick();
+ assert.match(f.$('app-process-action-status').textContent,/已退出 1\/2.*仍在结束 1/);
+ assert.equal(f.calls.filter(c=>c.command==='computer_overview').length,2);
+ assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+ assert.ok(!JSON.stringify(f.saved()).includes('opaque-'));
+ assert.ok(!JSON.stringify(f.saved()).includes('已退出 1/2'));
+});
+
+test('unbound termination stays disabled and backend identity failures do not dispatch resolve',async(t)=>{
+ const f=await fixture({processAction:async()=>{throw Error('进程身份或权限已变化，请刷新概览');}});t.after(()=>f.dom.window.close());
+ const snapshot=clone(f.w.eval('homeSnapshot'));
+ snapshot.process_rankings={cpu:[{pid:10,name:'Unknown',termination_reason:'身份未确认'},{pid:11,name:'Changed',termination_ref:'stale'}],memory:[]};
+ snapshot.applications.items=[{name:'Unknown app',running:true,termination_reason:'没有唯一的进程关联'}];f.w.renderOverview(snapshot);
+ const buttons=f.$('resource-cpu-processes').querySelectorAll('button');assert.equal(buttons[0].disabled,true);assert.match(buttons[0].title,/身份未确认/);
+ assert.equal(f.$('applications').querySelector('button').disabled,true);assert.match(f.$('applications').textContent,/没有唯一/);
+ buttons[1].click();await f.tick();assert.match(f.$('process-action-status').textContent,/身份或权限已变化/);
+ assert.equal(f.$('decision').hidden,true);assert.equal(f.calls.filter(c=>c.command==='process_action'&&c.args.action==='resolve').length,0);
+ assert.equal(f.$('refresh-home').disabled,false);
 });
 
 test('failed resource refresh retains dated facts and never requests a model', async (t) => {
@@ -574,4 +649,188 @@ test('profile unknowns, failed refresh, clipboard rejection and request exclusio
   f.$('refresh-profile').click();await f.tick();assert.equal(f.$('profile-summary').textContent,text);assert.match(f.$('profile-status').textContent,/保留上次/);
   Object.defineProperty(f.w.navigator,'clipboard',{value:{writeText:async()=>{throw Error('denied');}}});f.$('copy-profile').click();await f.tick();assert.match(f.$('profile-status').textContent,/复制失败/);
   f.w.eval('setBusy(true)');assert.equal(f.$('refresh-profile').disabled,true);await f.w.eval('refreshProfile()');assert.equal(attempts,2);f.w.eval('setBusy(false)');
+});
+
+test('inventory directories use separate commands, show freshness and preserve settings drafts',async(t)=>{
+ const rows=[{id:'fixture-id',root:'C:\\fixture',state:'building',entries:0,updated_at:null,message:'后台记录中'}];
+ const f=await fixture({directory:'C:\\fixture',inventory:args=>{if(args.action==='remove')return [];if(args.action==='stop')rows[0].state='pending';return clone(rows);}});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+ assert.equal(f.$('settings-inventory').hidden,false);assert.match(f.$('inventory-list').textContent,/记录中/);
+ f.$('add-inventory').click();await f.tick();assert.ok(f.calls.some(c=>c.command==='inventory_command'&&c.args.action==='add'&&c.args.path==='C:\\fixture'));
+ const stop=[...f.$('inventory-list').querySelectorAll('button')].find(b=>b.textContent==='停止本次更新');stop.click();await f.tick();assert.match(f.$('inventory-list').textContent,/待更新/);
+ assert.equal(f.calls.filter(c=>c.command==='save_settings').length,0);
+ [...f.$('inventory-list').querySelectorAll('button')].find(b=>b.textContent==='移除').click();await f.tick();assert.match(f.$('inventory-status').textContent,/尚未添加/);
+});
+
+test('completed reply preserves search coverage when channel result arrives late without replaying old requests',async(t)=>{
+ const f=await fixture({delayedSearchReceipt:true});t.after(()=>f.dom.window.close());
+ f.$('input').value='alpha';f.submit('composer');await f.tick();
+ assert.match(f.$('conversation').textContent,/已记录目录：仍可能有延迟/);
+ const previous=f.events.at(-1);const before=f.$('conversation').textContent;
+ previous({kind:'result',capability:'file_search',value:{items:[],coverage_note:'LATE OLD RESULT'}});await f.tick();
+ assert.equal(f.$('conversation').textContent,before);assert.equal(f.$('candidate-list').children.length,1);
+ f.$('input').value='absent';f.submit('composer');await f.tick();
+ previous({kind:'result',capability:'file_search',value:{items:[file],coverage_note:'STALE RESULT'}});await f.tick();
+ assert.equal(f.$('candidate-list').children.length,0);assert.doesNotMatch(f.$('conversation').textContent,/LATE OLD RESULT|STALE RESULT/);
+});
+
+test('full disk component management is explicit without a separate enable switch',async(t)=>{
+ const f=await fixture({indexService:args=>args.action==='install'?{state:'uac_cancelled'}:{state:'not_installed',enabled:true,payload_ready:true,volumes:[]}});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+ assert.equal(f.$('index-enable'),null);assert.equal(f.$('index-disable'),null);
+ f.w.document.querySelector('[data-index-action="install"]').click();await f.tick();assert.equal(f.$('decision').hidden,false);assert.equal(f.calls.filter(call=>call.command==='index_service_command'&&call.args.action==='install').length,0);
+ f.$('decision-no').click();await f.tick();
+ f.w.document.querySelector('[data-index-action="install"]').click();await f.tick();f.$('decision-yes').click();await f.tick();const install=f.calls.find(call=>call.command==='index_service_command'&&call.args.action==='install');assert.equal(install.args.confirmed,true);assert.equal(install.args.deleteIndex,false);assert.match(f.$('index-service-operation').textContent,/已取消管理员授权/);
+});
+test('missing payload keeps status and diagnostics available without installing',async(t)=>{
+ const f=await fixture();t.after(()=>f.dom.window.close());f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();assert.match(f.$('index-service-status').textContent,/安装产物尚未准备/);assert.equal(f.w.document.querySelector('[data-index-action="install"]').disabled,true);assert.equal(f.$('index-diagnostic').disabled,false);assert.equal(f.$('add-inventory').disabled,false);assert.equal(f.$('index-delete-data').checked,false);
+});
+test('saving full access offers component once while ordinary loading never installs',async(t)=>{
+ const f=await fixture({indexService:args=>({state:'not_installed',enabled:true,payload_ready:true,volumes:[]})});t.after(()=>f.dom.window.close());
+ assert.equal(f.calls.some(call=>call.command==='index_service_command'&&call.args.action==='install'),false);
+ f.change('access-mode','full');f.submit('settings-form');await f.tick();assert.equal(f.$('decision').hidden,false);f.$('decision-no').click();await f.tick();
+ assert.equal(f.saved().version,1);assert.equal(f.calls.some(call=>call.command==='index_service_command'&&call.args.action==='install'),false);
+ f.submit('settings-form');await f.tick();assert.equal(f.$('decision').hidden,true);
+});
+test('whole disk receipts show generation time and bounded reasons without rendering markup',async(t)=>{
+ const f=await fixture({searchReceipt:{source:'windows_service',coverage_note:'名称发现不授予打开权限',truncated:true,index_receipt:{complete:false,reasons:[],volumes:[{volume:'C:\\<img src=x>',phase:'coverage_incomplete',generation:7,updated_unix_ms:1700000000000,reasons:['unresolved_parent_chain']}]}}});t.after(()=>f.dom.window.close());f.$('input').value='fixture';f.submit('composer');await f.tick();assert.match(f.$('conversation').textContent,/代次 7/);assert.match(f.$('conversation').textContent,/父目录关系尚未补齐/);assert.match(f.$('conversation').textContent,/名称发现不授予打开权限/);assert.equal(f.$('conversation').querySelector('img'),null);
+});
+
+test('volume rebuild is local confirmed control and discovery failures remain visible',async(t)=>{
+ const key='a'.repeat(32)+'-00000001';
+ const f=await fixture({indexService:async args=>args.action==='status'?{state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['E:\\'],supported:true,worker_started:true,pipe:'volume-'+key,reason:'discovery_failed',index_status:{phase:'ready',generation:4,complete:true}}]}:{state:'accepted'}});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+ assert.match(f.$('index-service-volumes').textContent,/卷发现失败/);
+ f.$('index-service-volumes').querySelector('button').click();await f.tick();assert.equal(f.$('decision').hidden,false);assert.equal(f.calls.filter(x=>x.args?.action==='rebuild').length,0);
+ f.$('decision-yes').click();await f.tick();const call=f.calls.find(x=>x.args?.action==='rebuild');assert.equal(call.args.volumeKey,key);assert.equal(call.args.confirmed,true);assert.equal(call.args.deleteIndex,false);assert.match(f.$('index-service-operation').textContent,/请求已接受/);
+ assert.ok(f.calls.filter(x=>x.command==='index_service_command').every(x=>['status','rebuild'].includes(x.args.action)));
+});
+
+test('volume recovery distinguishes stopped maintenance from rebuildable state without leaking errors',async(t)=>{
+ const key='b'.repeat(32)+'-00000002';
+ const statuses=[{phase:'error',error:'maintenance_stopped'},{phase:'error',error:'storage_identity_changed'},{phase:'rebuild_required',error:'rebuild_required'},{phase:'error',error:'E:\\fictional-private\\secret.txt'}];
+ const f=await fixture({indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:statuses.map((status,i)=>({mounts:[`${i}:\\`],supported:true,worker_started:true,pipe:'volume-'+key,index_status:{...status,generation:42,updated_unix_ms:1700000000000}}))})});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+ const rows=f.$('index-service-volumes').children;
+ assert.match(rows[0].textContent,/维护线程已停止.*停止服务后重新启动/);assert.equal(rows[0].querySelector('button'),null);
+ assert.match(rows[1].textContent,/存储身份变化.*修复服务/);assert.equal(rows[1].querySelector('button'),null);
+ assert.match(rows[2].textContent,/需要重建记录/);assert.equal(rows[2].querySelector('button').textContent,'重建索引');
+ for(const row of rows) assert.match(row.textContent,/代次 42/);
+ assert.doesNotMatch(f.$('index-service-volumes').textContent,/fictional-private|secret.txt/);
+ assert.ok(f.calls.filter(x=>x.command==='index_service_command').every(x=>x.args.action==='status'));
+});
+
+test('stopped incompatible and disconnected services give manual recovery guidance without management calls',async(t)=>{
+ for(const [state,expected] of [['stopped',/服务管理中启动/],['version_mismatch',/服务管理中更新/],['unavailable',/检查或修复服务/]]) {
+  const f=await fixture({indexService:async()=>({state,enabled:true,payload_ready:true,volumes:[{mounts:['E:\\'],supported:true,worker_started:true,pipe:'volume-'+ 'c'.repeat(32)+'-00000003'}]})});t.after(()=>f.dom.window.close());
+  f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+  assert.match(f.$('index-service-status').textContent,expected);
+  assert.equal(f.$('index-service-volumes').querySelector('button'),null);
+  assert.ok(f.calls.filter(x=>x.command==='index_service_command').every(x=>x.args.action==='status'));
+ }
+});
+
+test('exited volume worker gives explicit manual restart guidance while temporary journal loss stays retryable',async(t)=>{
+ const f=await fixture({indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['E:\\'],supported:true,worker_started:false,worker_error:'worker_unavailable'},{mounts:['F:\\'],supported:true,worker_started:false,worker_error:'journal_unavailable'},{supported:false,worker_started:false,reason:'unsupported_filesystem'}]})});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+ const rows=f.$('index-service-volumes').children;
+ assert.match(rows[0].textContent,/停止服务后重新启动/);
+ assert.match(rows[1].textContent,/更新日志暂不可用/);assert.doesNotMatch(rows[1].textContent,/停止服务后重新启动/);
+ assert.match(rows[2].textContent,/文件系统暂不支持/);assert.doesNotMatch(rows[2].textContent,/卷已离线/);
+ assert.equal(f.$('index-service-volumes').querySelector('button'),null);
+ assert.ok(f.calls.filter(x=>x.command==='index_service_command').every(x=>x.args.action==='status'));
+});
+
+test('receipts collapse by default and visible summary keeps failures while answer and candidates remain',async(t)=>{
+ const f=await fixture({searchReceipt:{source:'windows_service',coverage_note:'全盘名称索引',truncated:true,index_receipt:{volumes:[{volume:'E:\\',phase:'error',error:'request_failed'}]}}});t.after(()=>f.dom.window.close());
+ f.$('input').value='fixture';f.submit('composer');await f.tick();
+ const details=[...f.$('conversation').querySelectorAll('details.message.receipt')];assert.ok(details.length>=2);assert.ok(details.every(detail=>!detail.open));
+ assert.match(details.map(detail=>detail.querySelector('summary').textContent).join(' '),/覆盖不完整/);
+ assert.match(details.map(detail=>detail.querySelector('summary').textContent).join(' '),/不可用/);
+ assert.match(f.$('conversation').querySelector('.message.assistant').textContent,/fixture response/);assert.equal(f.$('candidate-panel').hidden,false);
+ details[0].open=true;assert.match(details[0].textContent,/全盘名称索引/);
+ const restored=await fixture({workspace:f.saved()});t.after(()=>restored.dom.window.close());assert.ok([...restored.$('conversation').querySelectorAll('details.message.receipt')].every(detail=>!detail.open));assert.equal(restored.$('candidate-panel').hidden,true);
+});
+test('event and final search delivery deduplicate while distinct search identities retain evidence',async(t)=>{
+ const f=await fixture();t.after(()=>f.dom.window.close());f.$('input').value='slow';f.submit('composer');await f.tick();
+ const receipt={receipt_id:'search-a',items:[file],source:'inventory',coverage_note:'SYNTHETIC_COVERAGE'};
+ f.events[0]({kind:'result',capability:'file_search',value:receipt});await f.tick();const request=f.w.eval('activeRequest');
+ f.w.eval('applySearchReceipt')({...receipt,elapsed_ms:99,items:[{...file,id:'different-transient-id'}]},request);await f.tick();
+ assert.equal(f.saved().sessions[0].messages.filter(message=>message.text.includes('SYNTHETIC_COVERAGE')).length,1);
+ f.w.eval('applySearchReceipt')({...receipt,receipt_id:'search-b'},request);await f.tick();assert.equal(f.saved().sessions[0].messages.filter(message=>message.text.includes('SYNTHETIC_COVERAGE')).length,2);
+ f.$('cancel').click();await f.tick();f.events[0]({kind:'result',capability:'file_search',value:{...receipt,receipt_id:'late',coverage_note:'LATE'}});await f.tick();assert.doesNotMatch(f.$('conversation').textContent,/LATE/);
+});
+test('direct candidate click uses explicit local selected action',async(t)=>{
+ const f=await fixture();t.after(()=>f.dom.window.close());f.$('input').value='fixture';f.submit('composer');await f.tick();f.$('candidate-list').querySelector('button').click();await f.tick();assert.equal(f.calls.filter(call=>call.command==='perform').at(-1).args.kind,'open-selected');assert.equal(f.$('confirmation').hidden,true);
+});
+
+test('language follows explicit system metadata and preserves user names, paths and history', async(t)=>{
+  const workspace={version:1,sessions:[{id:'00000000-0000-4000-8000-000000000001',title:'我的中文自定义标题',draft:'中文草稿',messages:[{role:'user',text:'用户中文原文',error:false},{role:'receipt',text:'搜索结果（历史记录；操作前请重新搜索）：\nC:\\中文目录\\合同.txt',error:false}]}],tabs:['home','00000000-0000-4000-8000-000000000001'],active:'00000000-0000-4000-8000-000000000001',sidebar_width:205,collapsed:false,home_draft:''};
+  const f=await fixture({systemLanguage:'en',workspace});t.after(()=>f.dom.window.close());
+  assert.equal(f.w.document.documentElement.lang,'en');assert.equal(f.w.document.documentElement.classList.contains('language-loading'),false);
+  assert.equal(f.$('page-title').textContent,'我的中文自定义标题');assert.equal(f.$('input').value,'中文草稿');
+  assert.match(f.$('conversation').textContent,/用户中文原文/);assert.match(f.$('conversation').textContent,/C:\\中文目录\\合同.txt/);
+  assert.match(f.$('conversation').querySelector('summary').textContent,/Search record/);
+  assert.equal(f.calls.filter(c=>c.command==='save_settings'||c.command==='perform').length,0);
+  assert.equal(f.$('reset').textContent,'＋ New session');
+  assert.match(f.$('access-mode').options[0].textContent,/Restricted/);assert.equal(f.$('appearance').options[0].textContent,'Follow system');
+  assert.match(f.w.errorText('模型服务返回 HTTP 401：身份验证失败；请检查 API Key 是否有效，可运行 daosh setup 重新输入'),/HTTP 401: Authentication failed/);
+  f.w.selectTab('home');assert.match(f.$('memory-detail').textContent,/Used .*Total .*Available/);
+  f.w.renderOverview({...clone(f.w.eval('homeSnapshot')),network:{adapters:[{name:'中文设备名',has_ip:false}],limits:'接口计数器的短时采样；已配置 IP 不代表互联网可用，不主动发起联网探测。'}});
+  assert.match(f.$('networks').textContent,/中文设备名/);assert.match(f.$('network-note').textContent,/Short sample/);
+  assert.equal(f.w.eval('missingMessageKeys.size'),0);
+});
+
+test('language draft applies only after successful save and survives restart without losing models or access',async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  f.change('ui-language','en');assert.equal(f.w.document.documentElement.lang,'zh-CN');
+  f.submit('settings-form');await f.tick();
+  assert.equal(f.w.document.documentElement.lang,'en');assert.equal(f.$('save-settings').textContent,'Save settings');
+  const update=f.calls.find(c=>c.command==='save_settings').args.update;
+  assert.equal(update.config.ui_language,'en');assert.equal(update.config.models.choices[0].name,'fixture-model');assert.deepEqual(update.config.read_roots,['C:\\fixture']);assert.equal(update.config.appearance,'light');
+  const r=await fixture({settings:{revision:'saved',credential_available:[],config:update.config}});t.after(()=>r.dom.window.close());assert.equal(r.w.document.documentElement.lang,'en');
+  r.change('ui-language','auto');r.submit('settings-form');await r.tick();assert.equal(r.w.document.documentElement.lang,'zh-CN');
+  const failed=await fixture({settingsFailure:true});t.after(()=>failed.dom.window.close());failed.change('ui-language','en');failed.submit('settings-form');await failed.tick();
+  assert.equal(failed.w.document.documentElement.lang,'zh-CN');assert.equal(failed.$('ui-language').value,'en');assert.match(failed.$('settings-status').textContent,/settings disk full/);
+});
+
+test('English known failures remain meaningful and unknown failures remain failures; boot failure reveals usable UI',async(t)=>{
+  const f=await fixture({systemLanguage:'en'});t.after(()=>f.dom.window.close());
+  assert.match(f.w.errorText('配置已被其他入口修改，请重新载入后保存'),/Reload before saving/);
+  assert.match(f.w.errorText('本轮已取消；已经完成的改动不会撤回'),/canceled/);
+  assert.match(f.w.errorText('路径不在已配置的读取范围：C:\\用户原文'),/authorized read scope: C:\\用户原文/);
+  assert.match(f.w.errorText('此候选已失效，请重新查找'),/expired/);
+  assert.match(f.w.errorText('意外的新后端错误'),/did not complete/);
+  const broken=await fixture({languageFailure:true});t.after(()=>broken.dom.window.close());
+  assert.equal(broken.w.document.documentElement.lang,'en');assert.equal(broken.w.document.documentElement.classList.contains('language-loading'),false);
+  assert.match(broken.$('config-notice').textContent,/Interface language could not be read/);
+});
+
+test('all explicit static and dynamic message keys have both languages and preserve interpolation as text',async(t)=>{
+  const f=await fixture({systemLanguage:'en'});t.after(()=>f.dom.window.close());
+  for(const el of f.w.document.querySelectorAll('*'))for(const attr of el.getAttributeNames())if(attr==='data-i18n'||attr.startsWith('data-i18n-')) assert.ok(f.w.eval(`messages[${JSON.stringify(el.getAttribute(attr))}]`),el.getAttribute(attr));
+  for(const script of ['app.js','home.js','settings.js'])for(const match of (await readFile(new URL('../ui/'+script,import.meta.url),'utf8')).matchAll(/\bt\('([^']+)'/g)) assert.ok(f.w.eval(`messages[${JSON.stringify(match[1])}]`),match[1]);
+  assert.equal(f.w.eval('Object.values(messages).every(row=>typeof row.zh==="string"&&typeof row.en==="string"&&!/[\\u3400-\\u9fff]/.test(row.en))'),true);
+  assert.equal(f.w.t('app.open_value',{v0:'<img 中文用户名>'}),'Open <img 中文用户名>');
+  assert.equal(f.w.eval('missingMessageKeys.size'),0);
+});
+
+test('successful live-search fallbacks stay informative in English instead of becoming operation failures',async(t)=>{
+  const f=await fixture({systemLanguage:'en',searchReceipt:{coverage_note:'现场扫描：部分查询目录尚未登记加速，未缩小搜索范围。',source:'live',truncated:false}});t.after(()=>f.dom.window.close());
+  f.$('input').value='literal';f.submit('composer');await f.tick();
+  const receipt=f.$('conversation').querySelector('details .message-body');assert.match(receipt.textContent,/Live scan: some query folders are not registered/);assert.doesNotMatch(receipt.textContent,/did not complete/);
+  assert.match(f.w.localBuiltin('后台记录中；此范围暂用现场扫描'),/Recording in the background/);
+  assert.match(f.w.localBuiltin('未知本地状态'),/status details are unavailable/);
+  assert.match(f.w.errorText('未知真正错误'),/operation did not complete/);
+});
+
+test('English count labels avoid singular-plural errors and explain manual language priority',async(t)=>{
+  const f=await fixture({systemLanguage:'en'});t.after(()=>f.dom.window.close());
+  const snapshot=clone(f.w.eval('homeSnapshot'));snapshot.applications.items=[{name:'One fixture app',running:true}];f.w.renderOverview(snapshot);
+  assert.equal(f.$('apps-value').textContent,'Records: 1');assert.match(f.$('apps-detail').textContent,/Known running: 1/);
+  f.w.candidates([file]);assert.equal(f.$('candidate-count').textContent,'Items: 1');
+  assert.equal(f.w.t('app.search_record_value_items_details',{v0:1}),'Search record · Items: 1 · Details');
+  assert.equal(f.w.t('app.skipped_value_items',{v0:1}),' Skipped items: 1.');
+  const note=f.w.t('language.note');assert.match(note,/When following system/);assert.match(note,/manual choice takes priority/);
+  for(const count of [0,1,2])assert.equal(f.w.t('home.value_records_206',{v0:count}),`Records: ${count}`);
 });

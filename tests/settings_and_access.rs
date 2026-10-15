@@ -186,6 +186,7 @@ fn full_authority_cannot_move_without_a_durable_journal() {
         journal: None,
         cancel: Cancellation::default(),
         last_results: vec![],
+        last_search: None,
         side_effects_blocked: false,
     };
     let error = runtime
@@ -196,4 +197,73 @@ fn full_authority_cannot_move_without_a_durable_journal() {
         )
         .unwrap_err();
     assert!(error.to_string().contains("持久写操作记录"));
+}
+
+#[test]
+fn ui_language_defaults_are_read_only_and_save_preserves_configuration_and_conflicts() {
+    use dao_shell::localization::UiLanguage;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.json");
+    fs::write(&path, r#"{"read_roots":[],"write_roots":[],"appearance":"dark","model":{"endpoint":"http://127.0.0.1:10001/v1/chat/completions","model":"fixture","api_key_env":"FIXTURE_REFERENCE"}}"#).unwrap();
+    let original = fs::read(&path).unwrap();
+    let view = settings::read(&path).unwrap();
+    assert_eq!(view.config.ui_language, UiLanguage::Auto);
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let mut config = view.config.clone();
+    config.ui_language = UiLanguage::English;
+    let saved = settings::save(
+        &path,
+        SettingsUpdate {
+            expected_revision: view.revision.clone(),
+            config,
+            keys: vec![],
+        },
+    )
+    .unwrap();
+    assert_eq!(saved.effective_language, "en");
+    assert_eq!(saved.config.model, view.config.model);
+    assert_eq!(
+        serde_json::to_value(saved.config.appearance).unwrap(),
+        "dark"
+    );
+    assert_eq!(
+        saved.config.models.connections[0].api_key_env,
+        "FIXTURE_REFERENCE"
+    );
+    assert_eq!(
+        Config::load(&path).unwrap().ui_language,
+        UiLanguage::English
+    );
+    let before = fs::read(&path).unwrap();
+    assert!(
+        settings::save(
+            &path,
+            SettingsUpdate {
+                expected_revision: view.revision,
+                config: view.config,
+                keys: vec![]
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let mut config = saved.config;
+    config.ui_language = UiLanguage::Auto;
+    let restored = settings::save(
+        &path,
+        SettingsUpdate {
+            expected_revision: saved.revision,
+            config,
+            keys: vec![],
+        },
+    )
+    .unwrap();
+    assert_eq!(restored.config.ui_language, UiLanguage::Auto);
+    let auto_bytes = fs::read(&path).unwrap();
+    // Force a filesystem error with a directory at the configuration target.
+    let blocked = temp.path().join("blocked.json");
+    fs::create_dir(&blocked).unwrap();
+    assert!(restored.config.save(&blocked).is_err());
+    assert!(blocked.is_dir());
+    assert_eq!(fs::read(&path).unwrap(), auto_bytes);
 }

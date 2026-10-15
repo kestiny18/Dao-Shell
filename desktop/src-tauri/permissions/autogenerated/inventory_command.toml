@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-inventory-command"
+description = "Enables the inventory_command command without any pre-configured scope."
+commands.allow = ["inventory_command"]
+
+[[permission]]
+identifier = "deny-inventory-command"
+description = "Denies the inventory_command command without any pre-configured scope."
+commands.deny = ["inventory_command"]

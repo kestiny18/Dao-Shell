@@ -5,7 +5,10 @@ $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $desktop = Join-Path $workspace 'desktop'
 $previousPath = $env:Path
+$previousPayloadRequirement=$env:DAO_SHELL_REQUIRE_INDEX_PAYLOAD
 try {
+    & (Join-Path $PSScriptRoot 'prepare-index-payload.ps1')
+    $env:DAO_SHELL_REQUIRE_INDEX_PAYLOAD='1'
     $env:Path = "$(Join-Path $env:USERPROFILE '.cargo\bin');$(Join-Path $workspace '.tools\w64devkit\bin');$previousPath"
     $compiler = & rustc --version --verbose
     if ($LASTEXITCODE -ne 0 -or -not ($compiler -match '^host: x86_64-pc-windows-')) {
@@ -22,6 +25,7 @@ try {
     New-Item -ItemType Directory -Force -Path $notices | Out-Null
     Copy-Item -LiteralPath (Join-Path $workspace 'LICENSE') -Destination $resources
     Copy-Item -LiteralPath (Join-Path $desktop 'TRY-IT.zh-CN.txt') -Destination $resources
+    Copy-Item -LiteralPath (Join-Path $desktop 'TRY-IT.en.txt') -Destination $resources
     foreach ($dependency in $metadata.packages) {
         if (-not $dependency.source) { continue }
         $source = Split-Path -Parent $dependency.manifest_path
@@ -71,4 +75,4 @@ try {
     Write-Host "Installer: $output"
     Write-Host 'Verified: release executable uses Windows GUI subsystem (no console window).'
     $hash | Format-List
-} finally { $env:Path = $previousPath }
+} finally { $env:Path = $previousPath; $env:DAO_SHELL_REQUIRE_INDEX_PAYLOAD=$previousPayloadRequirement }

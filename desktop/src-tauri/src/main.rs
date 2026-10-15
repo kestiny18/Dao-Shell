@@ -3,10 +3,47 @@
 mod app_actions;
 mod bridge;
 mod directory;
+mod index_service;
+mod process_actions;
 use bridge::Bridge;
 use dao_shell::settings::{ConnectionTest, SettingsUpdate, SettingsView};
 use std::sync::Arc;
 use tauri::{State, ipc::Channel};
+#[tauri::command]
+fn language_info(state: State<'_, Arc<Bridge>>) -> serde_json::Value {
+    state.language_info()
+}
+
+#[tauri::command]
+async fn index_service_command(
+    state: State<'_, Arc<Bridge>>,
+    action: String,
+    confirmed: bool,
+    delete_index: bool,
+    volume_key: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if action == "rebuild" {
+            if delete_index {
+                return Err("重建不能删除索引目录".into());
+            }
+            return bridge
+                .index_service
+                .rebuild(volume_key.as_deref().unwrap_or(""), confirmed)
+                .map_err(|e| e.to_string());
+        }
+        if volume_key.is_some() {
+            return Err("此操作不接受卷标识".into());
+        }
+        bridge
+            .index_service
+            .command(&action, confirmed, delete_index)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "服务请求中断".to_string())?
+}
 
 #[tauri::command]
 fn session_info(state: State<'_, Arc<Bridge>>) -> Result<serde_json::Value, String> {
@@ -121,6 +158,20 @@ async fn application_action(
         .map_err(|_| "应用操作中断".to_string())?
 }
 #[tauri::command]
+async fn process_action(
+    state: State<'_, Arc<Bridge>>,
+    action: String,
+    reference: String,
+    confirmed: bool,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge.process_action(&action, &reference, confirmed)
+    })
+    .await
+    .map_err(|_| "进程操作中断".to_string())?
+}
+#[tauri::command]
 async fn computer_profile(state: State<'_, Arc<Bridge>>) -> Result<serde_json::Value, String> {
     let bridge = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || bridge.profile())
@@ -146,10 +197,25 @@ fn finish_close(window: tauri::Window) -> Result<(), String> {
     window.destroy().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn inventory_command(
+    state: State<'_, Arc<Bridge>>,
+    action: String,
+    id: Option<String>,
+    path: Option<std::path::PathBuf>,
+) -> Result<serde_json::Value, String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.inventory_command(&action, id, path))
+        .await
+        .map_err(|_| "目录记录请求中断".to_string())?
+}
 fn main() {
     tauri::Builder::default()
         .manage(Arc::new(Bridge::new()))
         .invoke_handler(tauri::generate_handler![
+            language_info,
+            index_service_command,
+            inventory_command,
             finish_close,
             choose_directory,
             session_info,
@@ -164,7 +230,8 @@ fn main() {
             test_connection,
             computer_overview,
             computer_profile,
-            application_action
+            application_action,
+            process_action
         ])
         .on_window_event(|window, event| {
             use tauri::{Emitter, Manager};
@@ -174,6 +241,7 @@ fn main() {
                 let _ = window.emit("workspace-close-requested", ());
             }
             if matches!(event, tauri::WindowEvent::Destroyed) {
+                window.state::<Arc<Bridge>>().inventory.shutdown();
                 window.state::<Arc<Bridge>>().cancel();
             }
         })

@@ -30,6 +30,8 @@ pub enum Appearance {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
+    pub ui_language: crate::localization::UiLanguage,
+    #[serde(default)]
     pub read_roots: Vec<PathBuf>,
     #[serde(default)]
     pub access_mode: AccessMode,

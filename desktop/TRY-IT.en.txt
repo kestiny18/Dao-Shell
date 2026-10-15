@@ -1,0 +1,47 @@
+Dao-Shell 0.1.0 — Windows desktop preview
+
+For Windows 10/11 x64. Double-click the installer, then open Dao-Shell from the
+desktop or Start menu. Rust, Node.js and a terminal are not required.
+The installer embeds the small WebView2 bootstrapper. It reuses an existing
+runtime; if missing, internet access is needed to download it from Microsoft.
+Without internet or WebView2, install Microsoft's offline runtime first.
+
+The interface follows the Windows user's UI language: Chinese variants use
+Simplified Chinese; all other or unknown languages use English.
+Settings → General & appearance → Interface language offers Follow system,
+简体中文 and English. Save settings to apply; the choice survives restart.
+Existing conversations, custom titles, file paths and application names remain
+as written. New model replies follow the interface language unless you request
+another language. System-owned dialogs can follow Windows' own language.
+
+Start with Overview. To use natural language, open Settings → Models, choose
+DeepSeek / OpenAI / Custom, enter your API key, test and save.
+Under Settings → Access, choose Full access (using a matching whole-volume index
+component by default), or Restricted access and add authorized folders.
+You can search by file name without configuring a model. Natural-language
+requests send relevant file names, paths and metadata to your chosen provider.
+No API key is bundled; model providers may charge for requests.
+
+Memory shows usage percentage and used/total capacity. CPU and memory process
+rankings are visible together. Click overview summaries to jump to details.
+Clicking a current file candidate uses the Windows default application directly,
+including HTML and executable files, without a second app confirmation.
+Ending a process or known app instance requires explicit local confirmation and
+may lose unsaved work. Protected or unverifiable processes cannot be ended.
+Full access uses the matching index component by default. First saving Full
+access may offer its explicit installation/update. Startup and search never
+automatically request administrator permission.
+Search receipts are collapsed by default; the answer and current candidates stay
+visible, and incomplete coverage or failures retain a summary.
+For persistent volume indexing failures, Settings → File search can generate and
+copy a safe diagnostic report without private file paths or account identifiers.
+
+This is an unsigned early preview. Windows may show an unknown-publisher or
+reputation prompt. Verify the source; do not disable system security protections.
+There is no automatic updater. Uninstall through Windows Installed apps.
+Uninstalling preserves personal configuration and saved credentials, and does
+not delete your searched files.
+
+Feedback: https://github.com/kestiny18/Dao-Shell/issues
+Describe steps, expected and actual results. Remove API keys and personal paths
+from screenshots or reports before sharing.

@@ -5,7 +5,9 @@
     "main"
   ],
   "permissions": [
-    "allow-session-info",
+    "allow-index-service-command",
+    "allow-inventory-command",
+    "allow-language-info", "allow-session-info",
     "allow-perform",
     "allow-confirm-open",
     "allow-cancel",
@@ -20,6 +22,7 @@
     "allow-register-session",
     "allow-finish-close",
     "allow-choose-directory",
-    "allow-application-action"
+    "allow-application-action",
+    "allow-process-action"
   ]
 }

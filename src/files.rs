@@ -186,10 +186,28 @@ pub fn normalize_existing(path: &Path) -> Result<PathBuf> {
 
 #[derive(Default)]
 pub struct Objects {
+    inventory: Option<std::sync::Arc<crate::inventory::Inventory>>,
+    index: Option<std::sync::Arc<dyn crate::search_index::IndexClient>>,
     entries: HashMap<String, FileObject>,
     by_path: HashMap<PathBuf, String>,
 }
 impl Objects {
+    pub fn set_index(
+        &mut self,
+        index: Option<std::sync::Arc<dyn crate::search_index::IndexClient>>,
+    ) {
+        self.index = index;
+    }
+    pub fn has_index(&self) -> bool {
+        self.index.is_some()
+    }
+    pub fn reset(&mut self) {
+        self.entries.clear();
+        self.by_path.clear();
+    }
+    pub fn set_inventory(&mut self, inventory: std::sync::Arc<crate::inventory::Inventory>) {
+        self.inventory = Some(inventory);
+    }
     pub fn insert(&mut self, path: &Path) -> Result<FileObject> {
         let path = normalize_existing(path)?;
         let identity = platform::identity(&path)?;
@@ -284,7 +302,11 @@ pub struct SearchResult {
     pub truncated: bool,
     pub skipped: usize,
     pub elapsed_ms: u128,
+    pub discovery_ms: u128,
+    pub validation_ms: u128,
     pub coverage_note: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_receipt: Option<crate::search_index::Receipt>,
 }
 pub fn search(
     request: &Search,
@@ -292,6 +314,7 @@ pub fn search(
     objects: &mut Objects,
     cancel: &Cancellation,
 ) -> Result<SearchResult> {
+    let search_started = Instant::now();
     let limit = request.limit.unwrap_or(20);
     ensure!(
         (1..=50).contains(&limit) && request.page <= 100,
@@ -328,15 +351,123 @@ pub fn search(
         .map(|s| chrono::DateTime::parse_from_rfc3339(s))
         .transpose()?;
     ensure!(after.zip(before).is_none_or(|(a, b)| a < b), "时间范围无效");
+    let mut index_unavailable = false;
+    if let Some(index) = objects.index.clone()
+        && request.directory.is_none()
+        && !request.query.trim().is_empty()
+        && request.terms.is_empty()
+        && matches!(request.kind, Kind::Any)
+        && matches!(request.sort, Sort::Relevance)
+        && request.extension.is_none()
+        && after.is_none()
+        && before.is_none()
+        && request.min_bytes.is_none()
+        && request.max_bytes.is_none()
+        && request.page == 0
+    {
+        if let Ok(batch) = index.search(request, cancel) {
+            cancel.check()?;
+            let validation_started = Instant::now();
+            let mut items = Vec::new();
+            let mut skipped = 0;
+            let mut receipt = batch.receipt;
+            for candidate in batch.candidates {
+                cancel.check()?;
+                let inserted = (|| -> Result<FileObject> {
+                    // No Scope expansion: these are discoverable names, not permission to open/read.
+                    candidate.check_mapping()?;
+                    let identity = platform::identity(&normalize_existing(&candidate.path)?)?;
+                    ensure!(
+                        identity.volume == candidate.volume && identity.index == candidate.file_id,
+                        "索引身份已变化"
+                    );
+                    let object = objects.insert(&candidate.path)?;
+                    candidate.check_mapping()?;
+                    ensure!(object.identity == identity, "索引对象在复核期间变化");
+                    Ok(object)
+                })();
+                match inserted {
+                    Ok(item) => items.push(item),
+                    Err(_) => skipped += 1,
+                }
+                if items.len() == limit {
+                    break;
+                }
+            }
+            if skipped > 0 {
+                receipt.complete = false;
+                receipt.reasons.push("candidate_changed".into());
+            }
+            return Ok(SearchResult {
+                source: "windows_service",
+                roots: Vec::new(),
+                observed_at: now(),
+                matched_in_scan: items.len(),
+                items,
+                page: request.page,
+                has_more: batch.has_more,
+                truncated: !receipt.complete,
+                skipped,
+                elapsed_ms: search_started.elapsed().as_millis(),
+                discovery_ms: validation_started
+                    .duration_since(search_started)
+                    .as_millis(),
+                validation_ms: validation_started.elapsed().as_millis(),
+                coverage_note: "全盘名称索引：仅展示当前系统用户可见的候选；按服务快照顺序显示，完整性与时间见各卷回执。搜索覆盖不授予正文读取或打开权限，实际操作仍按访问设置重新核验。",
+                index_receipt: Some(receipt),
+            });
+        }
+        cancel.check()?;
+        index_unavailable = true;
+    }
     let roots = match &request.directory {
         Some(p) => vec![scope.check(p, false)?],
         None => scope.read.clone(),
     };
+    if roots.is_empty() && objects.index.is_some() {
+        bail!(if index_unavailable {
+            "全盘索引服务当前不可用，请在设置 → 文件搜索检查状态；没有兼容目录可补充查询。搜索不会自动请求管理员权限。"
+        } else {
+            "当前筛选需要目录补充查询，尚无兼容目录。可指定已授权目录，或改用单个文件名关键词查询全盘；不会忽略当前筛选条件。"
+        });
+    }
     ensure!(
         !roots.is_empty(),
         "尚未设置读取目录。使用 --read-root 或 daosh config 配置"
     );
-    let start = Instant::now();
+    let mut inventory_note = "现场扫描：此筛选需要现场观察，未忽略任何筛选条件。";
+    if let Some(inventory) = &objects.inventory
+        && request.terms.is_empty()
+        && matches!(request.kind, Kind::Any)
+        && request.extension.is_none()
+        && after.is_none()
+        && before.is_none()
+        && request.min_bytes.is_none()
+        && request.max_bytes.is_none()
+    {
+        match inventory.records_with_reason(&roots, scope) {
+            Ok(records) => {
+                let mut result = search_records(
+                    request,
+                    roots,
+                    records,
+                    scope,
+                    objects,
+                    cancel,
+                    search_started,
+                )?;
+                if index_unavailable {
+                    result.coverage_note = "全盘索引服务当前不可用；仅使用列出的已记录兼容目录快照，非全盘；候选仍重新检查权限与身份。";
+                } else if objects.index.is_some() {
+                    result.coverage_note = "当前筛选或页码使用列出的已记录兼容目录快照，非全盘；所有筛选与排序仍保留，候选重新检查权限与身份。";
+                }
+                return Ok(result);
+            }
+            Err(note) => inventory_note = note,
+        }
+    }
+    let inventory_fallback = objects.inventory.is_some();
+    let start = search_started;
     let query = request.query.to_lowercase();
     let terms: Vec<_> = request
         .terms
@@ -447,6 +578,7 @@ pub fn search(
     }
     let matched_in_scan = found.len();
     let offset = request.page * limit;
+    let validation_started = Instant::now();
     let mut items = Vec::new();
     for (path, _, _, _) in found.into_iter().skip(offset).take(limit) {
         match scope.check(&path, false).and_then(|p| objects.insert(&p)) {
@@ -465,7 +597,87 @@ pub fn search(
         truncated,
         skipped: skipped + skipped_entries.get(),
         elapsed_ms: start.elapsed().as_millis(),
-        coverage_note: "仅在列出的目录内扫描文件名、相对路径和元数据；不读取正文，不能据文件名确认用途；跳过链接/不可访问项，翻页时重新观察。",
+        discovery_ms: validation_started.duration_since(start).as_millis(),
+        validation_ms: validation_started.elapsed().as_millis(),
+        index_receipt: None,
+        coverage_note: if index_unavailable {
+            "全盘索引服务当前不可用；本次仅在列出的授权兼容目录内补充查询，非全盘。最多 5 秒、100000 项、32 层；可在设置检查服务，不会自动请求管理员权限。"
+        } else if objects.index.is_some() {
+            "目录补充查询：本次条件只在列出的授权目录内按全部筛选执行，非全盘；最多 5 秒、100000 项、32 层，不读取正文。"
+        } else if inventory_fallback {
+            inventory_note
+        } else {
+            "仅在列出的目录内扫描文件名、相对路径和元数据；不读取正文，不能据文件名确认用途；跳过链接/不可访问项，翻页时重新观察。"
+        },
+    })
+}
+
+fn search_records(
+    request: &Search,
+    roots: Vec<PathBuf>,
+    mut records: Vec<crate::inventory::Record>,
+    scope: &Scope,
+    objects: &mut Objects,
+    cancel: &Cancellation,
+    start: Instant,
+) -> Result<SearchResult> {
+    let query = request.query.to_lowercase();
+    let mut seen = std::collections::HashSet::new();
+    records.retain(|r| {
+        seen.insert(r.path.clone())
+            && r.path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&query)
+    });
+    cancel.check()?;
+    match request.sort {
+        Sort::Relevance | Sort::ModifiedDesc => records.sort_by(|a, b| {
+            b.modified
+                .cmp(&a.modified)
+                .then_with(|| a.path.cmp(&b.path))
+        }),
+        Sort::SizeDesc => records.sort_by(|a, b| {
+            b.identity
+                .size
+                .cmp(&a.identity.size)
+                .then_with(|| a.path.cmp(&b.path))
+        }),
+        Sort::Name => records.sort_by(|a, b| a.path.cmp(&b.path)),
+    }
+    let matched_in_scan = records.len();
+    let limit = request.limit.unwrap_or(20);
+    let offset = request.page * limit;
+    let validation_started = Instant::now();
+    let mut items = Vec::new();
+    let mut skipped = 0;
+    for record in records.into_iter().skip(offset).take(limit) {
+        cancel.check()?;
+        match scope.check(&record.path, false).and_then(|path| {
+            platform::require_identity(&path, &record.identity)?;
+            objects.insert(&path)
+        }) {
+            Ok(item) => items.push(item),
+            Err(_) => skipped += 1,
+        }
+    }
+    Ok(SearchResult {
+        source: "inventory",
+        index_receipt: None,
+        roots,
+        observed_at: now(),
+        items,
+        page: request.page,
+        matched_in_scan,
+        has_more: matched_in_scan > offset + limit,
+        truncated: false,
+        skipped,
+        elapsed_ms: start.elapsed().as_millis(),
+        discovery_ms: validation_started.duration_since(start).as_millis(),
+        validation_ms: validation_started.elapsed().as_millis(),
+        coverage_note: "已记录目录：按上次完整快照匹配和排序，非实时；后续新增/修改可能尚未收录；应用运行时辅助更新。候选已重新检查权限与身份，失效项跳过。可在设置 → 文件搜索立即更新。",
     })
 }
 
@@ -508,26 +720,59 @@ fn match_score(
 }
 
 pub fn open(object: &FileObject) -> Result<serde_json::Value> {
-    if !object.identity.directory {
-        let ext = object
-            .path
-            .extension()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_ascii_lowercase();
-        // Positive allowlist: shortcuts, scripts and executables cannot pass as documents.
-        if ![
-            "pdf", "txt", "md", "csv", "json", "png", "jpg", "jpeg", "gif", "bmp", "webp", "mp3",
-            "wav", "mp4", "mkv", "docx", "xlsx", "pptx", "odt", "ods", "odp",
-        ]
-        .contains(&ext.as_str())
-        {
-            bail!("首版不打开此类型；仅支持常见文档、图片、音视频与目录");
-        }
-    }
-    platform::open_document(&object.path, &object.identity)?;
+    open_using(object, platform::open_document)
+}
+fn open_using(
+    object: &FileObject,
+    executor: impl FnOnce(&Path, &crate::core::FileIdentity) -> Result<()>,
+) -> Result<serde_json::Value> {
+    // The session decides authorization and the platform pins/rechecks identity.
+    // Windows chooses the association; no extension-derived verb or parameters.
+    executor(&object.path, &object.identity)?;
     Ok(
         serde_json::json!({"verification":"handoff", "status":"accepted", "path":object.path,
         "message":"系统已接受打开请求；尚未验证应用窗口或文件显示状态"}),
     )
+}
+
+#[cfg(test)]
+mod open_tests {
+    use super::*;
+    #[test]
+    fn system_open_handoff_has_no_extension_filter_and_keeps_failure_truthful() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["fixture.html", "fixture.exe", "fixture.unknown", "fixture"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"fictional, never executed").unwrap();
+            let object = FileObject {
+                id: "fixture".into(),
+                identity: platform::identity(&path).unwrap(),
+                path,
+                observed_at: now(),
+                modified_at: None,
+            };
+            let reply = open_using(&object, |path, identity| {
+                assert_eq!(path, &object.path);
+                assert_eq!(identity.index, object.identity.index);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(reply["verification"], "handoff");
+            assert!(open_using(&object, |_, _| anyhow::bail!("no association")).is_err());
+        }
+        let object = FileObject {
+            id: "directory".into(),
+            path: dir.path().into(),
+            identity: platform::identity(dir.path()).unwrap(),
+            observed_at: now(),
+            modified_at: None,
+        };
+        assert!(
+            open_using(&object, |_, identity| {
+                assert!(identity.directory);
+                Ok(())
+            })
+            .is_ok()
+        );
+    }
 }

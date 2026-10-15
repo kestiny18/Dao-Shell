@@ -186,6 +186,7 @@ pub async fn run(args: Args) -> Result<()> {
         journal: Some(journal),
         cancel,
         last_results: Vec::new(),
+        last_search: None,
         side_effects_blocked: false,
     };
     chat(&config, &mut runtime).await

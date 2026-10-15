@@ -30,6 +30,8 @@ pub struct Process {
     pub memory_bytes: Option<u64>,
     pub cpu_percent_one_core: Option<f32>,
     pub cpu_percent_total: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_filetime: Option<String>,
 }
 
 pub fn snapshot(
@@ -77,6 +79,17 @@ fn collect(
         .values()
         .map(|p| ((p.pid(), p.start_time()), p.accumulated_cpu_time()))
         .collect();
+    // Only matching native identities at both observations can become a desktop
+    // termination reference. Seconds-level sysinfo times are not authorization.
+    let creations: std::collections::HashMap<_, _> = if overview {
+        system
+            .processes()
+            .keys()
+            .filter_map(|p| crate::process_control::creation(p.as_u32()).map(|c| (p.as_u32(), c)))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
     // sysinfo's Windows CPU percentage does not establish its delta baseline on the
     // first immediate refresh. Read cumulative CPU counters at both observations
     // instead of treating its first percentage as a short-window measurement.
@@ -111,6 +124,10 @@ fn collect(
                 cpu_percent_total: cpu
                     .filter(|_| !system.cpus().is_empty())
                     .map(|p| p / system.cpus().len() as f32),
+                created_filetime: overview
+                    .then(|| crate::process_control::creation(p.pid().as_u32()))
+                    .flatten()
+                    .filter(|c| creations.get(&p.pid().as_u32()) == Some(c)),
             }
         })
         .collect();
@@ -222,6 +239,7 @@ mod tests {
                 memory_bytes: (pid != 11).then_some(1000 - u64::from(pid)),
                 cpu_percent_one_core: (pid != 11).then_some(pid as f32 * 2.0),
                 cpu_percent_total: (pid != 11).then_some(pid as f32),
+                created_filetime: Some("133700000000000001".into()),
             })
             .collect();
         let rankings = super::process_rankings(&rows, 10);
@@ -238,6 +256,8 @@ mod tests {
         assert_eq!(facts["cpu_interval_ms"], 712);
         assert_eq!(facts["disappeared_processes"], 2);
         assert!(facts.get("processes").is_none());
+        assert!(!facts.to_string().contains("created_filetime"));
+        assert!(!facts.to_string().contains("133700000000000001"));
     }
     #[test]
     fn explanation_facts_use_binary_units_and_keep_unknown_values() {

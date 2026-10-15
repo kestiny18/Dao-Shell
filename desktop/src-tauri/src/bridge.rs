@@ -16,13 +16,17 @@ use std::{
 use tauri::ipc::Channel;
 
 pub struct Bridge {
+    pub index_service: crate::index_service::Integration,
+    pub inventory: std::sync::Arc<dao_shell::inventory::Inventory>,
     config_path: PathBuf,
+    configuration_gate: Mutex<()>,
     sessions: Mutex<Sessions>,
     active: Mutex<Option<(String, String)>>,
     workspace: Mutex<WorkspaceStore>,
     pub control: RequestControl,
     overview: Mutex<Option<Value>>,
     applications: Mutex<crate::app_actions::Catalog>,
+    processes: Mutex<crate::process_actions::Catalog>,
 }
 #[derive(Default)]
 struct Sessions {
@@ -52,16 +56,25 @@ impl Bridge {
         )
     }
     fn with_path(config_path: PathBuf) -> Self {
+        let inventory =
+            dao_shell::inventory::Inventory::new(config_path.with_file_name("file-inventory"));
+        if let Ok(scope) = Config::load(&config_path).and_then(|c| c.scope(false)) {
+            inventory.resume(&scope);
+        }
         Self {
+            index_service: crate::index_service::Integration::new(config_path.clone()),
+            inventory,
             workspace: Mutex::new(WorkspaceStore::new(
                 config_path.with_file_name("workspace.json"),
             )),
             config_path,
+            configuration_gate: Mutex::new(()),
             sessions: Mutex::new(Sessions::default()),
             active: Mutex::new(None),
             control: RequestControl::default(),
             overview: Mutex::new(None),
             applications: Mutex::new(crate::app_actions::Catalog::default()),
+            processes: Mutex::new(crate::process_actions::Catalog::default()),
         }
     }
     fn path(&self) -> PathBuf {
@@ -96,10 +109,63 @@ impl Bridge {
         sessions.registered.insert(id);
         Ok(())
     }
+    pub fn inventory_command(
+        &self,
+        action: &str,
+        id: Option<String>,
+        path: Option<PathBuf>,
+    ) -> Result<serde_json::Value, String> {
+        let _gate = self.configuration_gate.lock().map_err(error)?;
+        let scope = match Config::load(&self.path()).and_then(|c| c.scope(false)) {
+            Ok(scope) => scope,
+            Err(_) if matches!(action, "status" | "stop" | "remove") => {
+                dao_shell::files::Scope::new(&[], &[]).map_err(error)?
+            }
+            Err(e) => return Err(error(e)),
+        };
+        self.inventory.restrict(&scope);
+        match action {
+            "status" => {}
+            "add" => {
+                self.inventory
+                    .add(path.as_deref().ok_or("缺少目录")?, &scope)
+                    .map_err(error)?;
+            }
+            "update" => self
+                .inventory
+                .update(id.as_deref().ok_or("缺少目录记录")?, &scope)
+                .map_err(error)?,
+            "stop" => self
+                .inventory
+                .stop(id.as_deref().ok_or("缺少目录记录")?)
+                .map_err(error)?,
+            "remove" => self
+                .inventory
+                .remove(id.as_deref().ok_or("缺少目录记录")?)
+                .map_err(error)?,
+            _ => return Err("不支持的目录操作".into()),
+        }
+        serde_json::to_value(self.inventory.statuses(&scope).map_err(error)?).map_err(error)
+    }
     pub fn info(&self) -> Result<Value, String> {
         let config = Config::load(&self.path()).map_err(error)?;
-        let session = FileSession::new(&config, self.control.cancellation()).map_err(error)?;
-        serde_json::to_value(session.info()).map_err(error)
+        let session = FileSession::new_with_language(
+            &config,
+            self.control.cancellation(),
+            dao_shell::localization::effective(config.ui_language),
+        )
+        .map_err(error)?;
+        let mut value = serde_json::to_value(session.info()).map_err(error)?;
+        value["effective_language"] = dao_shell::localization::effective(config.ui_language)
+            .tag()
+            .into();
+        Ok(value)
+    }
+    pub fn language_info(&self) -> Value {
+        let preference = Config::load(&self.path())
+            .map(|c| c.ui_language)
+            .unwrap_or_default();
+        json!({"effective_language":dao_shell::localization::effective(preference).tag()})
     }
     pub fn settings(&self) -> Result<SettingsView, String> {
         settings::read(&self.path()).map_err(error)
@@ -108,8 +174,12 @@ impl Bridge {
         self.reserve()?;
         let _release = Release(self);
         let mut sessions = self.sessions.lock().map_err(error)?;
+        let _gate = self.configuration_gate.lock().map_err(error)?;
         let saved = settings::save(&self.path(), update).map_err(error)?;
         sessions.contexts.clear();
+        if let Ok(scope) = Config::load(&self.path()).and_then(|c| c.scope(false)) {
+            self.inventory.restrict(&scope);
+        }
         Ok(saved)
     }
     pub fn overview(&self) -> Result<Value, String> {
@@ -117,12 +187,18 @@ impl Bridge {
         let _release = Release(self);
         // Invalidate earlier action references even when the next sampling fails.
         *self.applications.lock().map_err(error)? = crate::app_actions::Catalog::default();
+        *self.processes.lock().map_err(error)? = crate::process_actions::Catalog::default();
         let mut snapshot =
             dao_shell::computer::overview(&self.control.cancellation()).map_err(error)?;
         self.applications
             .lock()
             .map_err(error)?
             .refresh(&mut snapshot);
+        let targets = self.applications.lock().map_err(error)?.running_targets();
+        self.processes
+            .lock()
+            .map_err(error)?
+            .refresh(&mut snapshot, targets);
         *self.overview.lock().map_err(|_| "概览不可用".to_string())? = Some(snapshot.clone());
         Ok(snapshot)
     }
@@ -133,6 +209,42 @@ impl Bridge {
             dao_shell::profile::collect(&self.control.cancellation()).map_err(error)?,
         )
         .map_err(error)
+    }
+    pub fn process_action(
+        &self,
+        action: &str,
+        reference: &str,
+        confirmed: bool,
+    ) -> Result<Value, String> {
+        match action {
+            "prepare" if !confirmed => {
+                self.reserve()?;
+                let result = (|| {
+                    let mut catalog = self.processes.lock().map_err(error)?;
+                    let value = catalog.prepare(reference)?;
+                    if self.control.cancellation().is_cancelled() {
+                        catalog.cancel_pending();
+                        return Err("已取消，未结束进程".into());
+                    }
+                    Ok(value)
+                })();
+                // Keep the existing global admission reserved while the human
+                // decides; only this opaque confirmation may resolve it.
+                if result.is_err() {
+                    self.control.release();
+                }
+                result
+            }
+            "resolve" => {
+                let mut catalog = self.processes.lock().map_err(error)?;
+                if !catalog.owns_pending(reference) {
+                    return Err("结束进程确认已失效".into());
+                }
+                let _release = Release(self);
+                catalog.resolve(reference, confirmed, &self.control.cancellation())
+            }
+            _ => Err("不支持的进程操作".into()),
+        }
     }
     pub fn application_action(&self, id: &str, action: &str) -> Result<Value, String> {
         self.reserve()?;
@@ -193,6 +305,7 @@ impl Bridge {
             "say" => Action::Say(input),
             "search" => Action::Search(input),
             "open" => Action::Open(input),
+            "open-selected" => Action::OpenSelected(input),
             "explain" => {
                 let snapshot = self
                     .overview
@@ -212,6 +325,8 @@ impl Bridge {
             return Err("请求已失效".into());
         }
         let config = Config::load(&self.path()).map_err(error)?;
+        self.inventory
+            .restrict(&config.scope(false).map_err(error)?);
         let encoded = serde_json::to_string(&config).map_err(error)?;
         let (mut session, context_reset, configuration_changed) = {
             let mut sessions = self.sessions.lock().map_err(error)?;
@@ -225,14 +340,19 @@ impl Bridge {
             (
                 match existing {
                     Some(s) => s,
-                    None => {
-                        FileSession::new(&config, self.control.cancellation()).map_err(error)?
-                    }
+                    None => FileSession::new_with_language(
+                        &config,
+                        self.control.cancellation(),
+                        dao_shell::localization::effective(config.ui_language),
+                    )
+                    .map_err(error)?,
                 },
                 reset,
                 changed,
             )
         };
+        session.set_inventory(self.inventory.clone());
+        session.set_index(self.index_service.client(config.access_mode));
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -257,6 +377,11 @@ impl Bridge {
     }
     pub fn cancel(&self) {
         self.control.cancel();
+        if let Ok(mut catalog) = self.processes.try_lock()
+            && catalog.cancel_pending()
+        {
+            self.control.release();
+        }
     }
     pub fn cancel_for(&self, session_id: &str, request_id: &str) -> Result<(), String> {
         let owner = self.active.lock().map_err(error)?;
@@ -324,6 +449,81 @@ impl Interaction for DesktopInteraction<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn process_confirmation_holds_admission_invalid_tokens_cannot_release_and_cancel_revokes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_path(dir.path().join("config.json"));
+        bridge.reserve().unwrap();
+        bridge
+            .processes
+            .lock()
+            .unwrap()
+            .fixture_pending("opaque-confirmation");
+        assert!(bridge.application_action("unknown", "uninstall").is_err());
+        assert!(bridge.process_action("resolve", "wrong", true).is_err());
+        assert!(bridge.reserve().is_err());
+        let result = bridge
+            .process_action("resolve", "opaque-confirmation", false)
+            .unwrap();
+        assert_eq!(result["state"], "cancelled");
+        bridge.reserve().unwrap();
+        bridge.processes.lock().unwrap().fixture_pending("later");
+        bridge.cancel();
+        assert!(bridge.process_action("resolve", "later", true).is_err());
+        bridge.reserve().unwrap();
+        drop(Release(&bridge));
+        assert!(bridge.process_action("prepare", "unknown", false).is_err());
+        bridge.reserve().unwrap();
+        drop(Release(&bridge));
+    }
+    #[test]
+    fn inventory_control_is_independent_and_inaccessible_roots_can_be_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("files");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("synthetic.txt"), "fixture").unwrap();
+        let config_path = temp.path().join("config.json");
+        Config {
+            read_roots: vec![root.clone()],
+            ..Default::default()
+        }
+        .save(&config_path)
+        .unwrap();
+        let bridge = Bridge::with_path(config_path);
+        bridge.reserve().unwrap();
+        let rows = bridge
+            .inventory_command("add", None, Some(root.clone()))
+            .unwrap();
+        let id = rows[0]["id"].as_str().unwrap().to_owned();
+        assert!(
+            bridge
+                .inventory_command("stop", Some(id.clone()), None)
+                .is_ok()
+        );
+        assert!(
+            bridge
+                .inventory_command("update", Some(id.clone()), None)
+                .is_ok()
+        );
+        std::fs::rename(&root, temp.path().join("relocated")).unwrap();
+        let rows = bridge.inventory_command("status", None, None).unwrap();
+        assert_eq!(rows[0]["state"], "unavailable");
+        assert_eq!(rows[0]["root"], "（当前无访问权限）");
+        assert!(
+            bridge
+                .inventory_command("remove", Some(id), None)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("relocated/synthetic.txt")).unwrap(),
+            "fixture"
+        );
+        bridge.inventory.shutdown();
+        drop(Release(&bridge));
+    }
     #[test]
     fn application_actions_share_request_reservation_and_release_after_error() {
         let dir = tempfile::tempdir().unwrap();

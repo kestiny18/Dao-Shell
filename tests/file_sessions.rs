@@ -38,6 +38,12 @@ async fn sessions_do_not_share_candidates_cancellation_or_confirmation() {
     let found = first.execute(Action::Search("合同".into()), &mut ui).await;
     assert!(!found.error);
     assert_eq!(found.items.len(), 1);
+    let receipt = found.search_receipt.as_ref().unwrap();
+    assert_eq!(receipt["source"], "scan");
+    assert_eq!(receipt["items"][0]["id"], found.items[0].id);
+    let elapsed = receipt["elapsed_ms"].as_u64().unwrap();
+    assert!(receipt["discovery_ms"].as_u64().unwrap() <= elapsed);
+    assert!(receipt["validation_ms"].as_u64().unwrap() <= elapsed);
     let id = found.items[0].id.clone();
     assert!(
         second
@@ -48,6 +54,7 @@ async fn sessions_do_not_share_candidates_cancellation_or_confirmation() {
     assert_eq!(ui.confirmations, 0);
     let declined = first.execute(Action::Open(id.clone()), &mut ui).await;
     assert!(!declined.error);
+    assert!(declined.search_receipt.is_none());
     assert!(declined.message.contains("未选择打开"));
     assert_eq!(ui.confirmations, 1);
     let empty = first
@@ -101,4 +108,32 @@ async fn changed_candidate_is_rejected_before_desktop_confirmation() {
     fs::write(file, "changed contents").unwrap();
     assert!(session.execute(Action::Open(id), &mut ui).await.error);
     assert_eq!(ui.confirmations, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn english_match_counts_are_clear_for_zero_one_and_multiple_without_changing_file_names() {
+    use dao_shell::localization::Language;
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("one-中文.txt"), "fixture").unwrap();
+    fs::write(temp.path().join("two-中文.txt"), "fixture").unwrap();
+    let config = Config {
+        read_roots: vec![temp.path().into()],
+        ..Default::default()
+    };
+    let mut session =
+        FileSession::new_with_language(&config, Cancellation::default(), Language::English)
+            .unwrap();
+    let mut ui = Ui::default();
+    for (query, count) in [("absent", 0), ("one-", 1), ("中文", 2)] {
+        let reply = session.execute(Action::Search(query.into()), &mut ui).await;
+        assert!(!reply.error);
+        assert_eq!(reply.message, format!("Matches: {count}."));
+        assert_eq!(reply.items.len(), count);
+        assert!(
+            reply
+                .items
+                .iter()
+                .all(|item| item.path.to_string_lossy().contains("中文"))
+        );
+    }
 }

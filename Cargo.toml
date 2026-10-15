@@ -13,6 +13,10 @@ publish = false
 name = "daosh"
 path = "src/main.rs"
 
+[[bin]]
+name = "dao-index-worker"
+path = "src/bin_index_worker.rs"
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -21,7 +25,7 @@ ctrlc = "3"
 dirs = "6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 rpassword = "7"
-rusqlite = { version = "0.40", default-features = false, features = ["libsqlite3-sys", "bundled"] }
+rusqlite = { version = "0.40", default-features = false, features = ["libsqlite3-sys", "bundled", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = "0.39"
@@ -29,16 +33,13 @@ tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 walkdir = "2"
+notify = "8.2"
 
 [target.'cfg(windows)'.dependencies]
 base64 = "0.22"
 png = "0.18"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Credentials", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_Registry", "Win32_System_WindowsProgramming", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Credentials", "Win32_Security_Cryptography", "Win32_System_Services", "Win32_System_SystemServices", "Win32_System_SystemInformation", "Win32_System_RemoteDesktop", "Win32_System_Com", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Threading", "Win32_Security_Authorization", "Win32_System_Ioctl", "Win32_System_Registry", "Win32_System_WindowsProgramming", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = "thin"
 strip = true
-
-[dev-dependencies]
-# Experimental directory notifications; not part of the production Shell runtime.
-notify = "8.2"

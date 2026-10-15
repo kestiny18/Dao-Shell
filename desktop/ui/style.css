@@ -65,14 +65,19 @@ h1 { font-size: 29px; font-weight: 550; margin: 10px 0; letter-spacing: -.7px; }
 h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
 p { line-height: 1.8; }
 .page-heading p, .card p, .setting-group p { font-size: 12px; color: var(--muted); margin: 8px 0; }
-.metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 12px; }
 .card { border: 1px solid var(--line); background: var(--surface); border-radius: 11px; padding: 18px; min-width: 0; }
 .metrics strong { display: block; font-size: 24px; font-weight: 500; margin-top: 12px; }
 .metrics p { font-size: 11px; }
+.metric-button { text-align: left; color: inherit; font: inherit; display: flex; flex-direction: column; align-items: flex-start; }
+.metric-button:hover { background: var(--tint); }
+.metric-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.metric-detail { display: block; font-size: 11px; color: var(--muted); line-height: 1.8; margin: 8px 0; overflow-wrap: anywhere; }
+.metric-link { display: block; font-size: 11px; color: var(--accent); margin-top: auto; padding-top: 4px; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 12px; }
 .section-heading h2 { margin: 0; }
 .section-heading span { font-size: 11px; color: var(--muted); }
-.disks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.disks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); gap: 10px; }
 .disk strong { overflow-wrap: anywhere; }
 progress { width: 100%; height: 7px; accent-color: #63866a; }
 .home-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 18px 0; }
@@ -151,9 +156,7 @@ footer { flex-shrink: 0; padding: 12px 0 15px; }
   aside { padding: 24px 12px; }
   main { padding: 0 20px; }
   .local-label { display: none; }
-  .metrics { grid-template-columns: 1fr; }
   .metrics strong { font-size: 20px; }
-  .disks { grid-template-columns: 1fr; }
   .page-heading { align-items: flex-start; flex-direction: column; }
   h1 { font-size: 25px; }
 }
@@ -199,6 +202,14 @@ header { padding: 12px 0; gap: 12px; }
 .app-context-menu button[aria-disabled=true] { opacity: .55; cursor: default; }
 .app-context-menu small { display: block; font-size: 11px; white-space: normal; margin-top: 3px; }
 /* Resource rows remain readable on narrow windows without widening the page. */
+.process-rankings { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:20px; }
+.process-ranking { min-width:0; }
+.process-ranking h3 { margin:12px 0 6px; font-size:13px; font-weight:600; }
+.process-end { padding:5px 8px; font-size:11px; }
+.app-process-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.app-process-controls small { font-size:11px; color:var(--muted); }
+.process-action-status { font-size:12px; color:var(--muted); overflow-wrap:anywhere; }
+#resource-details, #application-details { scroll-margin-top:12px; }
 .process-table-scroll { overflow-x:auto; }
 .process-table { width:100%; border-collapse:collapse; font-size:13px; }
 .process-table th,.process-table td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
@@ -206,3 +217,15 @@ header { padding: 12px 0; gap: 12px; }
 .process-table th:not(:first-child),.process-table td:not(:first-child) { white-space:nowrap; text-align:right; }
 
 .profile-summary { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
+
+.message.receipt > summary { cursor:pointer; padding:3px 0; color:var(--muted); }
+.message.receipt > .message-body { margin-top:8px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.message.receipt[open] > summary { margin-bottom:4px; }
+#index-diagnostic-text { display:block; width:100%; box-sizing:border-box; resize:vertical; font-family:monospace; }
+
+/* Keep the first visible frame in the resolved language. */
+.language-loading body { visibility: hidden; }
+html[lang="en"] .metrics { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+html[lang="en"] .settings-tabs { flex-wrap: wrap; }
+html[lang="en"] .home-actions, html[lang="en"] .settings-save { flex-wrap: wrap; }
+html[lang="en"] .brand-name small { white-space: normal; }

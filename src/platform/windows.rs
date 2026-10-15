@@ -182,9 +182,12 @@ pub fn open_document(path: &Path, expected: &FileIdentity) -> Result<()> {
             SW_SHOWNORMAL,
         )
     };
+    if result as isize == 31 {
+        anyhow::bail!("此类型尚未配置 Windows 默认打开应用，请先在系统设置中选择关联应用");
+    }
     ensure!(
         result as isize > 32,
-        "系统未接受打开请求（代码 {}）",
+        "Windows 未接受打开请求（代码 {}）；未报告文件已显示或程序已运行",
         result as isize
     );
     Ok(())

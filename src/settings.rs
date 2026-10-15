@@ -22,6 +22,7 @@ static WRITER: Mutex<()> = Mutex::new(());
 #[derive(Serialize)]
 pub struct SettingsView {
     pub revision: String,
+    pub effective_language: String,
     pub config: Config,
     pub credential_available: Vec<String>,
 }
@@ -107,8 +108,12 @@ pub fn read(path: &Path) -> Result<SettingsView> {
                 .map(|_| c.id.clone())
         })
         .collect();
+    let effective_language = crate::localization::effective(config.ui_language)
+        .tag()
+        .to_owned();
     Ok(SettingsView {
         revision,
+        effective_language,
         config,
         credential_available,
     })

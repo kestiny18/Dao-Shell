@@ -24,12 +24,14 @@ pub struct Reply {
     pub message: String,
     pub error: bool,
     pub items: Vec<FileObject>,
+    pub search_receipt: Option<serde_json::Value>,
 }
 
 pub enum Action {
     Say(String),
     Search(String),
     Open(String),
+    OpenSelected(String),
     Reset,
     ExplainComputer(serde_json::Value),
 }
@@ -38,10 +40,18 @@ pub struct FileSession {
     runtime: Runtime,
     dialogue: Option<Dialogue>,
     info: SessionInfo,
+    language: crate::localization::Language,
 }
 
 impl FileSession {
     pub fn new(config: &Config, cancel: Cancellation) -> Result<Self> {
+        Self::new_with_language(config, cancel, crate::localization::Language::Chinese)
+    }
+    pub fn new_with_language(
+        config: &Config,
+        cancel: Cancellation,
+        language: crate::localization::Language,
+    ) -> Result<Self> {
         let scope = config.scope(false)?;
         let runtime = Runtime {
             scope,
@@ -49,18 +59,19 @@ impl FileSession {
             journal: None,
             cancel,
             last_results: Vec::new(),
+            last_search: None,
             side_effects_blocked: false,
         };
         let (dialogue, model_error) = match config
             .model
             .as_ref()
-            .map(|c| Dialogue::new_file_entry(c, &runtime))
+            .map(|c| Dialogue::new_file_entry_language(c, &runtime, language))
         {
             Some(Ok(dialogue)) => (Some(dialogue), None),
             Some(Err(error)) => (None, Some(format!("{error:#}"))),
             None => (
                 None,
-                Some("尚未配置模型，将按文件名搜索；可在设置 → 模型中添加".into()),
+                Some(language.choose("尚未配置模型，将按文件名搜索；可在设置 → 模型中添加", "No model configured. Search will match file names; add a model in Settings → Models.").into()),
             ),
         };
         let info = SessionInfo {
@@ -73,7 +84,21 @@ impl FileSession {
             runtime,
             dialogue,
             info,
+            language,
         })
+    }
+
+    pub fn set_inventory(&mut self, inventory: std::sync::Arc<crate::inventory::Inventory>) {
+        self.runtime.objects.set_inventory(inventory);
+    }
+    pub fn set_index(
+        &mut self,
+        index: Option<std::sync::Arc<dyn crate::search_index::IndexClient>>,
+    ) {
+        if let Some(dialogue) = &mut self.dialogue {
+            dialogue.set_global_name_discovery(index.is_some());
+        }
+        self.runtime.objects.set_index(index);
     }
 
     pub fn info(&self) -> &SessionInfo {
@@ -81,6 +106,7 @@ impl FileSession {
     }
 
     pub async fn execute(&mut self, action: Action, ui: &mut dyn Interaction) -> Reply {
+        self.runtime.last_search = None;
         let result = match self.runtime.cancel.check() {
             Ok(()) => self.perform(action, ui).await,
             Err(error) => Err(error),
@@ -102,6 +128,7 @@ impl FileSession {
             .filter_map(|id| self.runtime.objects.get(id).ok().cloned())
             .collect();
         Reply {
+            search_receipt: self.runtime.last_search.clone(),
             message,
             error,
             items,
@@ -109,14 +136,17 @@ impl FileSession {
     }
 
     async fn perform(&mut self, action: Action, ui: &mut dyn Interaction) -> Result<String> {
+        let selected = matches!(&action, Action::OpenSelected(_));
         match action {
             Action::ExplainComputer(snapshot) => {
-                let dialogue = self
-                    .dialogue
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("请先在设置中连接模型"))?;
+                let dialogue = self.dialogue.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        self.language
+                            .choose("请先在设置中连接模型", "Connect a model in Settings first")
+                    )
+                })?;
                 dialogue.observe_local("resource_snapshot", &snapshot);
-                dialogue.turn("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", &mut self.runtime, ui).await
+                dialogue.turn(self.language.choose("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", "Briefly explain the local disk, CPU and memory snapshot. State its observation time and limits. Analyze only the supplied facts and do not call file tools."), &mut self.runtime, ui).await
             }
             Action::Say(input) => {
                 ensure!(!input.trim().is_empty(), "请输入你想找的文件");
@@ -125,32 +155,42 @@ impl FileSession {
                     match dialogue.turn(&input, &mut self.runtime, ui).await {
                         Err(error) if error.is::<UnavailableBeforeTools>() => {
                             dialogue.reset();
-                            format!("当前模型不可用：{error}。尝试用文件名搜索。")
+                            if self.language == crate::localization::Language::Chinese {
+                                format!("当前模型不可用：{error}。尝试用文件名搜索。")
+                            } else {
+                                "The model is unavailable. Trying file-name search.".into()
+                            }
                         }
                         result => return result,
                     }
                 } else if self.info.model.is_some() {
-                    "当前模型不可用，请检查模型配置。尝试用文件名搜索。".into()
+                    self.language.choose("当前模型不可用，请检查模型配置。尝试用文件名搜索。", "The model is unavailable. Check its configuration. Trying file-name search.").into()
                 } else {
-                    "尚未配置模型，尝试用文件名搜索。".into()
+                    self.language
+                        .choose(
+                            "尚未配置模型，尝试用文件名搜索。",
+                            "No model configured. Trying file-name search.",
+                        )
+                        .into()
                 };
                 self.runtime.cancel.check()?;
                 ui.progress(&notice);
                 let result = self.search(&input, ui)?;
-                Ok(format!(
-                    "{notice}\n按原输入匹配文件名，不理解自然语言；可改用简短文件名关键词。\n{result}"
-                ))
+                Ok(format!("{notice}\n{}\n{result}", self.language.choose("按原输入匹配文件名，不理解自然语言；可改用简短文件名关键词。", "Matches file names using the original input, without understanding natural language. Try a short file-name keyword.")))
             }
             Action::Search(query) => self.search(&query, ui),
-            Action::Open(id) => {
+            Action::Open(id) | Action::OpenSelected(id) => {
                 ensure!(
                     self.runtime.last_results.contains(&id),
                     "此候选已失效，请重新查找"
                 );
                 self.runtime.side_effects_blocked = false;
-                let result = self
-                    .runtime
-                    .call("file_open", json!({"object_id":id}), ui)?;
+                let result = if selected {
+                    self.runtime.open_selected(&id, ui)?
+                } else {
+                    self.runtime
+                        .call("file_open", json!({"object_id":id}), ui)?
+                };
                 if let Some(dialogue) = &mut self.dialogue {
                     dialogue.observe_local("file_open", &result);
                 }
@@ -160,13 +200,16 @@ impl FileSession {
                     .into())
             }
             Action::Reset => {
-                self.runtime.objects = Objects::default();
+                self.runtime.objects.reset();
                 self.runtime.last_results.clear();
                 self.runtime.side_effects_blocked = false;
                 if let Some(dialogue) = &mut self.dialogue {
                     dialogue.reset();
                 }
-                Ok("已开始新会话。".into())
+                Ok(self
+                    .language
+                    .choose("已开始新会话。", "Started a new session.")
+                    .into())
             }
         }
     }
@@ -179,10 +222,27 @@ impl FileSession {
         if let Some(dialogue) = &mut self.dialogue {
             dialogue.observe_local("file_search", &result);
         }
-        Ok(if result["truncated"] == true {
-            "本次扫描达到预算，结果并不完整；可缩小目录范围后重试。".into()
-        } else {
-            format!("找到 {} 个候选。", self.runtime.last_results.len())
-        })
+        Ok(
+            if result["source"] == "windows_service" && result["truncated"] == true {
+                format!(
+                    "{}{}{}",
+                    self.language.choose("找到 ", "Matches: "),
+                    self.runtime.last_results.len(),
+                    self.language.choose(
+                        " 个候选；部分卷或记录尚不可用，详见索引覆盖回执。",
+                        "; some volumes or records are unavailable. See the index coverage receipt."
+                    )
+                )
+            } else if result["truncated"] == true {
+                self.language.choose("本次扫描达到预算，结果并不完整；可缩小目录范围后重试。", "This scan reached its budget and results are incomplete. Narrow the folder scope and retry.").into()
+            } else {
+                format!(
+                    "{}{}{}",
+                    self.language.choose("找到 ", "Matches: "),
+                    self.runtime.last_results.len(),
+                    self.language.choose(" 个候选。", ".")
+                )
+            },
+        )
     }
 }

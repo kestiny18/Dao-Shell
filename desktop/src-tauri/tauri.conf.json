@@ -17,10 +17,10 @@
     "licenseFile": "../../LICENSE",
     "icon": ["icons/icon.png", "icons/icon.ico"],
     "windows": {
-      "webviewInstallMode": { "type": "offlineInstaller" },
+      "webviewInstallMode": { "type": "embedBootstrapper" },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["SimpChinese", "English"],
+        "languages": ["English", "SimpChinese"],
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico",
         "installerHooks": "installer-hooks.nsh",

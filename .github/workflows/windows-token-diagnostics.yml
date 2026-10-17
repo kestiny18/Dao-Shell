@@ -1,0 +1,11 @@
+name: Windows test-token diagnostics
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: ./scripts/diagnose-ci-windows-child.ps1

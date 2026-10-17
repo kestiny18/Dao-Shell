@@ -22,7 +22,7 @@ pub(super) fn run(name: &str) -> Result<()> {
         unsafe {
             OpenProcessToken(
                 GetCurrentProcess(),
-                TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY,
+                TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_ADJUST_DEFAULT,
                 &mut token,
             )
         } != 0,
@@ -49,6 +49,7 @@ pub(super) fn run(name: &str) -> Result<()> {
         std::io::Error::last_os_error()
     );
     let limited = security::owned(limited)?;
+    own_default_dacl(security::raw(&limited))?;
     let mut elevation = TOKEN_ELEVATION::default();
     let mut size = 0;
     ensure!(
@@ -195,6 +196,53 @@ pub(super) fn run(name: &str) -> Result<()> {
     ensure!(
         text.contains("1 passed"),
         "restricted fixture did not run its exact test: {text}"
+    );
+    Ok(())
+}
+
+// Filtering the Administrators group does not rewrite an elevated token's default
+// DACL. Give newly created fixture objects access for their actual user and SYSTEM.
+// This changes only the new token, never the host token or any existing object ACL.
+fn own_default_dacl(token: HANDLE) -> Result<()> {
+    use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+    let sid = security::current()?.sid;
+    let sddl = security::wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid})"));
+    let mut descriptor = ptr::null_mut();
+    ensure!(
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                1,
+                &mut descriptor,
+                ptr::null_mut(),
+            )
+        } != 0,
+        "fixture default DACL descriptor: {}",
+        std::io::Error::last_os_error()
+    );
+    let descriptor = security::Descriptor(descriptor);
+    let mut present = 0;
+    let mut defaulted = 0;
+    let mut acl = ptr::null_mut();
+    ensure!(
+        unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut acl, &mut defaulted) }
+            != 0
+            && present != 0
+            && !acl.is_null(),
+        "fixture default DACL unavailable"
+    );
+    let value = TOKEN_DEFAULT_DACL { DefaultDacl: acl };
+    ensure!(
+        unsafe {
+            SetTokenInformation(
+                token,
+                TokenDefaultDacl,
+                (&value as *const TOKEN_DEFAULT_DACL).cast(),
+                size_of::<TOKEN_DEFAULT_DACL>() as u32,
+            )
+        } != 0,
+        "set fixture token default DACL: {}",
+        std::io::Error::last_os_error()
     );
     Ok(())
 }

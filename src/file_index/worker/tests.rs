@@ -9,6 +9,11 @@ fn restricted_child_runs_real_ipc_auth_cursor_incremental_and_restart() {
 }
 
 #[test]
+fn restricted_child_preserves_snapshot_after_nested_crash() {
+    ordinary_token::run("abrupt_process_exit_preserves_published_snapshot").unwrap();
+}
+
+#[test]
 fn fixture_rejects_elevated_token_before_opening_database() {
     if !security::current().unwrap().elevated {
         return; // The ordinary-token behavior is covered by the real IPC test above.

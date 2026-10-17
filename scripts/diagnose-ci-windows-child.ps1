@@ -32,6 +32,8 @@ public static class DaoChildProbe {
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool SetHandleInformation(IntPtr h,uint mask,uint flags);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern uint GetSystemDirectoryW(StringBuilder s,uint n);
     [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr p,uint access,out IntPtr token);
+    [DllImport("advapi32.dll",SetLastError=true)] static extern bool SetTokenInformation(IntPtr t,int kind,IntPtr data,uint n);
+    [DllImport("advapi32.dll")] static extern uint GetLengthSid(IntPtr sid);
     [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr t,int kind,IntPtr data,uint n,out uint returned);
     [DllImport("advapi32.dll",SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr t,uint flags,uint disables,IntPtr sids,uint deletes,IntPtr privileges,uint restricts,IntPtr restricted,out IntPtr result);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSidToSidW(string text,out IntPtr sid);
@@ -59,8 +61,8 @@ public static class DaoChildProbe {
     [DllImport("kernel32.dll",SetLastError=true)] static extern bool TerminateProcess(IntPtr p,uint code);
     public sealed class Result {
         public string TokenKind; public int ApiError;
-        public bool? Elevated, AdminEnabled, SameSession, StationRead, DesktopRead;
-        public uint? IntegrityRid; public int StationError, DesktopError;
+        public bool? Elevated, AdminEnabled, SameSession, StationRead, DesktopRead, StationAllAccess, DesktopAllAccess;
+        public uint? IntegrityRid; public int StationError, DesktopError, StationAllError, DesktopAllError;
         public List<Launch> Children = new List<Launch>();
     }
     public sealed class Launch { public string Image; public int CreateError; public bool TimedOut; public string Exit; public long OutputBytes; }
@@ -84,13 +86,37 @@ public static class DaoChildProbe {
             try{Check(SaferComputeTokenFromLevel(level,original,out result,0,IntPtr.Zero));return result;}
             finally{SaferCloseLevel(level);}
         }
-        if(kind=="LuaDisableMax") {Check(CreateRestrictedToken(original,5,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out result));return result;}
+        if(kind=="SaferThenLuaDisableMax") {
+            var safer=Token(original,"SaferNormalUser");
+            try{Check(CreateRestrictedToken(safer,5,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out result));return result;}
+            finally{CloseHandle(safer);}
+        }
+        if(kind=="LuaDisableMax" || kind=="LuaOnly" || kind=="DisableMaxOnly" || kind=="LuaDisableMaxMedium") {
+            uint flags=kind=="LuaOnly"?4u:kind=="DisableMaxOnly"?1u:5u;
+            Check(CreateRestrictedToken(original,flags,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out result));
+            try{if(kind=="LuaDisableMaxMedium") LowerMedium(result);return result;}
+            catch{CloseHandle(result);throw;}
+        }
         IntPtr admin; Check(ConvertStringSidToSidW("S-1-5-32-544",out admin));
         IntPtr entry=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SidEntry)));
         try {
             Marshal.StructureToPtr(new SidEntry{Sid=admin},entry,false);
             Check(CreateRestrictedToken(original,1,1,entry,0,IntPtr.Zero,0,IntPtr.Zero,out result));return result;
         } finally {Marshal.FreeHGlobal(entry);LocalFree(admin);}
+    }
+    static void LowerMedium(IntPtr token) {
+        // Only this newly created token is changed. Never raise integrity or alter the host token.
+        var current=Info(token,25);
+        try {
+            var label=Marshal.ReadIntPtr(current);var n=Marshal.ReadByte(GetSidSubAuthorityCount(label));
+            if((uint)Marshal.ReadInt32(GetSidSubAuthority(label,(uint)(n-1)))<8192) throw new InvalidOperationException();
+        }finally{Marshal.FreeHGlobal(current);}
+        IntPtr sid;Check(ConvertStringSidToSidW("S-1-16-8192",out sid));
+        IntPtr entry=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SidEntry)));
+        try {
+            Marshal.StructureToPtr(new SidEntry{Sid=sid,Attributes=0x20},entry,false);
+            Check(SetTokenInformation(token,25,entry,(uint)Marshal.SizeOf(typeof(SidEntry))+GetLengthSid(sid)));
+        }finally{Marshal.FreeHGlobal(entry);LocalFree(sid);}
     }
     static void Describe(IntPtr token,IntPtr original,Result r,string station,string desktop) {
         r.Elevated=Integer(token,20)!=0; r.SameSession=Integer(token,12)==Integer(original,12);
@@ -109,6 +135,9 @@ public static class DaoChildProbe {
         try {
             var ws=OpenWindowStationW(station,false,2);r.StationRead=ws!=IntPtr.Zero;r.StationError=ws==IntPtr.Zero?Marshal.GetLastWin32Error():0;if(ws!=IntPtr.Zero)CloseWindowStation(ws);
             var ds=OpenDesktopW(desktop,0,false,1);r.DesktopRead=ds!=IntPtr.Zero;r.DesktopError=ds==IntPtr.Zero?Marshal.GetLastWin32Error():0;if(ds!=IntPtr.Zero)CloseDesktop(ds);
+            // Requesting rights does not modify either object; no write API is used.
+            var allWs=OpenWindowStationW(station,false,0xF037F);r.StationAllAccess=allWs!=IntPtr.Zero;r.StationAllError=allWs==IntPtr.Zero?Marshal.GetLastWin32Error():0;if(allWs!=IntPtr.Zero)CloseWindowStation(allWs);
+            var allDs=OpenDesktopW(desktop,0,false,0xF01FF);r.DesktopAllAccess=allDs!=IntPtr.Zero;r.DesktopAllError=allDs==IntPtr.Zero?Marshal.GetLastWin32Error():0;if(allDs!=IntPtr.Zero)CloseDesktop(allDs);
         }finally {if(!RevertToSelf()) Environment.FailFast("Probe could not revert thread impersonation");}
     }
     static Launch Spawn(IntPtr token,string image,string arguments,string label) {
@@ -145,12 +174,12 @@ public static class DaoChildProbe {
         }
     }
     public static List<Result> Run(string harness) {
-        var result=new List<Result>();IntPtr original;Check(OpenProcessToken(GetCurrentProcess(),0xB,out original));
+        var result=new List<Result>();IntPtr original;Check(OpenProcessToken(GetCurrentProcess(),0x8B,out original));
         try {
             var system=new StringBuilder(32768);if(GetSystemDirectoryW(system,(uint)system.Capacity)==0)throw new Win32Exception();
             var cmd=Path.Combine(system.ToString(),"cmd.exe");
             var station=ObjectName(GetProcessWindowStation());var desktop=ObjectName(GetThreadDesktop(GetCurrentThreadId()));
-            foreach(string kind in new[]{"Original","LuaDisableMax","SaferNormalUser","AdminDenyDisableMax"}) {
+            foreach(string kind in new[]{"Original","LuaDisableMax","SaferNormalUser","AdminDenyDisableMax","LuaOnly","DisableMaxOnly","LuaDisableMaxMedium","SaferThenLuaDisableMax"}) {
                 var r=new Result{TokenKind=kind};IntPtr token=IntPtr.Zero;
                 try {
                     token=Token(original,kind);Describe(token,original,r,station,desktop);

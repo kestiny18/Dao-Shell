@@ -23,6 +23,7 @@ public static class DaoChildProbe {
         public uint x,y,xs,ys,xc,yc,fill,flags; public ushort show, reservedSize;
         public IntPtr reservedBytes, input, output, error;
     }
+    [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public uint length; public IntPtr descriptor; public int inherit; }
     [StructLayout(LayoutKind.Sequential)] struct StartupEx { public Startup startup; public IntPtr attributes; }
     [StructLayout(LayoutKind.Sequential)] struct ProcessInfo { public IntPtr process, thread; public uint pid, tid; }
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
@@ -37,6 +38,11 @@ public static class DaoChildProbe {
     [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr t,int kind,IntPtr data,uint n,out uint returned);
     [DllImport("advapi32.dll",SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr t,uint flags,uint disables,IntPtr sids,uint deletes,IntPtr privileges,uint restricts,IntPtr restricted,out IntPtr result);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSidToSidW(string text,out IntPtr sid);
+    [DllImport("advapi32.dll")] static extern bool EqualSid(IntPtr a,IntPtr b);
+    [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertSidToStringSidW(IntPtr sid,out IntPtr text);
+    [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(string text,uint revision,out IntPtr descriptor,out uint length);
+    [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr descriptor,out bool present,out IntPtr acl,out bool defaulted);
+    [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetAce(IntPtr acl,uint index,out IntPtr ace);
     [DllImport("advapi32.dll")] static extern bool IsWellKnownSid(IntPtr sid,int kind);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
     [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid,uint index);
@@ -62,6 +68,7 @@ public static class DaoChildProbe {
     public sealed class Result {
         public string TokenKind; public int ApiError;
         public bool? Elevated, AdminEnabled, SameSession, StationRead, DesktopRead, StationAllAccess, DesktopAllAccess;
+        public bool? OwnerIsUser, DefaultDaclNull, DefaultDaclAllowsUser, DefaultDaclAllowsAdmin, DefaultDaclAllowsSystem, DefaultDaclUserFull;
         public uint? IntegrityRid; public int StationError, DesktopError, StationAllError, DesktopAllError;
         public List<Launch> Children = new List<Launch>();
     }
@@ -91,10 +98,14 @@ public static class DaoChildProbe {
             try{Check(CreateRestrictedToken(safer,5,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out result));return result;}
             finally{CloseHandle(safer);}
         }
-        if(kind=="LuaDisableMax" || kind=="LuaOnly" || kind=="DisableMaxOnly" || kind=="LuaDisableMaxMedium") {
+        if(kind=="LuaDisableMax" || kind=="LuaOnly" || kind=="DisableMaxOnly" || kind=="LuaDisableMaxMedium" || kind=="LuaOwnProcessThreadDacl" || kind=="LuaUserDefaultDacl") {
             uint flags=kind=="LuaOnly"?4u:kind=="DisableMaxOnly"?1u:5u;
             Check(CreateRestrictedToken(original,flags,0,IntPtr.Zero,0,IntPtr.Zero,0,IntPtr.Zero,out result));
-            try{if(kind=="LuaDisableMaxMedium") LowerMedium(result);return result;}
+            try{
+                if(kind=="LuaDisableMaxMedium") LowerMedium(result);
+                if(kind=="LuaUserDefaultDacl") SetOwnDefaultDacl(result);
+                return result;
+            }
             catch{CloseHandle(result);throw;}
         }
         IntPtr admin; Check(ConvertStringSidToSidW("S-1-5-32-544",out admin));
@@ -118,7 +129,42 @@ public static class DaoChildProbe {
             Check(SetTokenInformation(token,25,entry,(uint)Marshal.SizeOf(typeof(SidEntry))+GetLengthSid(sid)));
         }finally{Marshal.FreeHGlobal(entry);LocalFree(sid);}
     }
+    static IntPtr OwnDescriptor(IntPtr token) {
+        var user=Info(token,1);IntPtr text=IntPtr.Zero;
+        try {
+            Check(ConvertSidToStringSidW(Marshal.ReadIntPtr(user),out text));
+            IntPtr descriptor;uint n;
+            Check(ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;GA;;;SY)(A;;GA;;;"+Marshal.PtrToStringUni(text)+")",1,out descriptor,out n));
+            return descriptor;
+        }finally{if(text!=IntPtr.Zero)LocalFree(text);Marshal.FreeHGlobal(user);}
+    }
+    static void SetOwnDefaultDacl(IntPtr token) {
+        var descriptor=OwnDescriptor(token);var data=Marshal.AllocHGlobal(IntPtr.Size);
+        try {
+            bool present,defaulted;IntPtr acl;Check(GetSecurityDescriptorDacl(descriptor,out present,out acl,out defaulted));
+            if(!present || acl==IntPtr.Zero)throw new InvalidOperationException();
+            Marshal.WriteIntPtr(data,acl);Check(SetTokenInformation(token,6,data,(uint)IntPtr.Size));
+        }finally{Marshal.FreeHGlobal(data);LocalFree(descriptor);}
+    }
+    static void DescribeDacl(IntPtr token,Result r) {
+        var user=Info(token,1);var owner=Info(token,4);var dacl=Info(token,6);
+        try {
+            var sid=Marshal.ReadIntPtr(user);r.OwnerIsUser=EqualSid(sid,Marshal.ReadIntPtr(owner));
+            var acl=Marshal.ReadIntPtr(dacl);r.DefaultDaclNull=acl==IntPtr.Zero;
+            r.DefaultDaclAllowsUser=false;r.DefaultDaclAllowsAdmin=false;r.DefaultDaclAllowsSystem=false;r.DefaultDaclUserFull=false;
+            if(acl==IntPtr.Zero)return;
+            uint count=(ushort)Marshal.ReadInt16(acl,4);
+            for(uint i=0;i<count;i++) {
+                IntPtr ace;Check(GetAce(acl,i,out ace));if(Marshal.ReadByte(ace)!=0)continue;
+                var target=IntPtr.Add(ace,8);uint mask=(uint)Marshal.ReadInt32(ace,4);
+                if(EqualSid(sid,target)) {r.DefaultDaclAllowsUser=true;r.DefaultDaclUserFull=(mask&0x10000000)!=0 || (mask&0x1FFFFF)==0x1FFFFF;}
+                if(IsWellKnownSid(target,26))r.DefaultDaclAllowsAdmin=true;
+                if(IsWellKnownSid(target,22))r.DefaultDaclAllowsSystem=true;
+            }
+        }finally{Marshal.FreeHGlobal(dacl);Marshal.FreeHGlobal(owner);Marshal.FreeHGlobal(user);}
+    }
     static void Describe(IntPtr token,IntPtr original,Result r,string station,string desktop) {
+        DescribeDacl(token,r);
         r.Elevated=Integer(token,20)!=0; r.SameSession=Integer(token,12)==Integer(original,12);
         var integrity=Info(token,25);
         try {var sid=Marshal.ReadIntPtr(integrity);var count=Marshal.ReadByte(GetSidSubAuthorityCount(sid));r.IntegrityRid=(uint)Marshal.ReadInt32(GetSidSubAuthority(sid,(uint)(count-1)));}
@@ -140,10 +186,10 @@ public static class DaoChildProbe {
             var allDs=OpenDesktopW(desktop,0,false,0xF01FF);r.DesktopAllAccess=allDs!=IntPtr.Zero;r.DesktopAllError=allDs==IntPtr.Zero?Marshal.GetLastWin32Error():0;if(allDs!=IntPtr.Zero)CloseDesktop(allDs);
         }finally {if(!RevertToSelf()) Environment.FailFast("Probe could not revert thread impersonation");}
     }
-    static Launch Spawn(IntPtr token,string image,string arguments,string label) {
+    static Launch Spawn(IntPtr token,string image,string arguments,string label,bool ownProcessDacl) {
         var r=new Launch{Image=label};
         string log=Path.Combine(Path.GetTempPath(),"dao-child-probe-"+Guid.NewGuid().ToString("N")+".log");
-        IntPtr attr=IntPtr.Zero,list=IntPtr.Zero,desktop=IntPtr.Zero;
+        IntPtr attr=IntPtr.Zero,list=IntPtr.Zero,desktop=IntPtr.Zero,descriptor=IntPtr.Zero,security=IntPtr.Zero;
         ProcessInfo info=new ProcessInfo();bool initialized=false,finished=false;
         try {
             using(var output=new FileStream(log,FileMode.CreateNew,FileAccess.Write,FileShare.ReadWrite))
@@ -156,7 +202,11 @@ public static class DaoChildProbe {
                 Check(UpdateProcThreadAttribute(attr,0,(UIntPtr)0x20002,list,(UIntPtr)(IntPtr.Size*2),IntPtr.Zero,IntPtr.Zero));
                 desktop=Marshal.StringToHGlobalUni("");
                 var startup=new StartupEx{startup=new Startup{cb=(uint)Marshal.SizeOf(typeof(StartupEx)),desktop=desktop,flags=0x100,input=ih,output=oh,error=oh},attributes=attr};
-                bool created=CreateProcessAsUserW(token,image,new StringBuilder("\""+image+"\" "+arguments),IntPtr.Zero,IntPtr.Zero,true,0x08080000,IntPtr.Zero,null,ref startup,out info);
+                if(ownProcessDacl) {
+                    descriptor=OwnDescriptor(token);security=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(SecurityAttributes)));
+                    Marshal.StructureToPtr(new SecurityAttributes{length=(uint)Marshal.SizeOf(typeof(SecurityAttributes)),descriptor=descriptor},security,false);
+                }
+                bool created=CreateProcessAsUserW(token,image,new StringBuilder("\""+image+"\" "+arguments),security,security,true,0x08080000,IntPtr.Zero,null,ref startup,out info);
                 int err=Marshal.GetLastWin32Error();SetHandleInformation(oh,1,0);SetHandleInformation(ih,1,0);
                 if(!created){r.CreateError=err;return r;}
                 uint wait=WaitForSingleObject(info.process,10000);
@@ -170,6 +220,7 @@ public static class DaoChildProbe {
             if(info.thread!=IntPtr.Zero)CloseHandle(info.thread);
             if(initialized)DeleteProcThreadAttributeList(attr);
             if(attr!=IntPtr.Zero)Marshal.FreeHGlobal(attr);if(list!=IntPtr.Zero)Marshal.FreeHGlobal(list);if(desktop!=IntPtr.Zero)Marshal.FreeHGlobal(desktop);
+            if(security!=IntPtr.Zero)Marshal.FreeHGlobal(security);if(descriptor!=IntPtr.Zero)LocalFree(descriptor);
             if(File.Exists(log))File.Delete(log);
         }
     }
@@ -179,12 +230,12 @@ public static class DaoChildProbe {
             var system=new StringBuilder(32768);if(GetSystemDirectoryW(system,(uint)system.Capacity)==0)throw new Win32Exception();
             var cmd=Path.Combine(system.ToString(),"cmd.exe");
             var station=ObjectName(GetProcessWindowStation());var desktop=ObjectName(GetThreadDesktop(GetCurrentThreadId()));
-            foreach(string kind in new[]{"Original","LuaDisableMax","SaferNormalUser","AdminDenyDisableMax","LuaOnly","DisableMaxOnly","LuaDisableMaxMedium","SaferThenLuaDisableMax"}) {
+            foreach(string kind in new[]{"Original","LuaDisableMax","SaferNormalUser","AdminDenyDisableMax","LuaOnly","DisableMaxOnly","LuaDisableMaxMedium","SaferThenLuaDisableMax","LuaOwnProcessThreadDacl","LuaUserDefaultDacl"}) {
                 var r=new Result{TokenKind=kind};IntPtr token=IntPtr.Zero;
                 try {
                     token=Token(original,kind);Describe(token,original,r,station,desktop);
-                    r.Children.Add(Spawn(token,cmd,"/d /c exit 0","SystemCmd"));
-                    if(!String.IsNullOrEmpty(harness))r.Children.Add(Spawn(token,harness,"--list","RustHarnessList"));
+                    r.Children.Add(Spawn(token,cmd,"/d /c exit 0","SystemCmd",kind=="LuaOwnProcessThreadDacl"));
+                    if(!String.IsNullOrEmpty(harness))r.Children.Add(Spawn(token,harness,"--list","RustHarnessList",kind=="LuaOwnProcessThreadDacl"));
                 }catch(Win32Exception e){r.ApiError=e.NativeErrorCode;}
                 finally{if(token!=IntPtr.Zero && token!=original)CloseHandle(token);}
                 result.Add(r);

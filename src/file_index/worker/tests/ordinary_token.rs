@@ -71,9 +71,56 @@ pub(super) fn run(name: &str) -> Result<()> {
     let log = dir.path().join("child.log");
     let output = File::create(&log)?;
     let handle = output.as_raw_handle() as HANDLE;
+    let input = File::open("NUL")?;
+    let input_handle = input.as_raw_handle() as HANDLE;
     ensure!(
         unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } != 0,
         "inherit fixture output"
+    );
+    ensure!(
+        unsafe { SetHandleInformation(input_handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) }
+            != 0,
+        "inherit fixture input"
+    );
+    // A NULL desktop inherits the elevated parent's window station/desktop. An
+    // empty name lets Windows connect using the restricted child's logon context.
+    let mut desktop = [0u16];
+    // Only this child's valid standard handles may be inherited. In particular,
+    // do not inherit another parallel fixture's desktop/window-station handles.
+    let mut bytes = 0;
+    unsafe {
+        InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut bytes);
+    }
+    ensure!(bytes > 0, "fixture attribute size unavailable");
+    let mut attribute_storage = vec![0usize; bytes.div_ceil(size_of::<usize>())];
+    let attributes = attribute_storage.as_mut_ptr().cast();
+    ensure!(
+        unsafe { InitializeProcThreadAttributeList(attributes, 1, 0, &mut bytes) } != 0,
+        "initialize fixture handle list"
+    );
+    struct Attributes(LPPROC_THREAD_ATTRIBUTE_LIST);
+    impl Drop for Attributes {
+        fn drop(&mut self) {
+            unsafe {
+                DeleteProcThreadAttributeList(self.0);
+            }
+        }
+    }
+    let _attributes = Attributes(attributes);
+    let inherited = [handle, input_handle];
+    ensure!(
+        unsafe {
+            UpdateProcThreadAttribute(
+                attributes,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                inherited.as_ptr().cast(),
+                size_of_val(&inherited),
+                ptr::null_mut(),
+                ptr::null(),
+            )
+        } != 0,
+        "set fixture handle list"
     );
     let exe = std::env::current_exe()?;
     let exe = security::wide(exe.to_str().context("non Unicode test image")?);
@@ -81,12 +128,17 @@ pub(super) fn run(name: &str) -> Result<()> {
         "\"{}\" --exact file_index::worker::tests::{name} --nocapture",
         std::env::current_exe()?.display()
     ));
-    let startup = STARTUPINFOW {
-        cb: size_of::<STARTUPINFOW>() as u32,
-        dwFlags: STARTF_USESTDHANDLES,
-        hStdOutput: handle,
-        hStdError: handle,
-        ..Default::default()
+    let startup = STARTUPINFOEXW {
+        StartupInfo: STARTUPINFOW {
+            cb: size_of::<STARTUPINFOEXW>() as u32,
+            lpDesktop: desktop.as_mut_ptr(),
+            dwFlags: STARTF_USESTDHANDLES,
+            hStdInput: input_handle,
+            hStdOutput: handle,
+            hStdError: handle,
+            ..Default::default()
+        },
+        lpAttributeList: attributes,
     };
     let mut info = PROCESS_INFORMATION::default();
     let created = unsafe {
@@ -97,16 +149,17 @@ pub(super) fn run(name: &str) -> Result<()> {
             ptr::null(),
             ptr::null(),
             1,
-            CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
             ptr::null(),
             ptr::null(),
-            &startup,
+            &startup.StartupInfo,
             &mut info,
         )
     };
     let error = std::io::Error::last_os_error();
     unsafe {
         SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+        SetHandleInformation(input_handle, HANDLE_FLAG_INHERIT, 0);
     }
     ensure!(created != 0, "start restricted fixture child: {error}");
     let process = security::owned(info.hProcess)?;

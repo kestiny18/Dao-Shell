@@ -6,6 +6,7 @@ Plans are dated scopes and decisions. Their status is not proof that every later
 
 ## Current references
 
+- [P15 — Publish 0.1.0](2026-10-17-p15-release-0.1.0.md): release checks, source-bound Windows assets and publication evidence.
 - [P11 — Windows index service](2026-10-10-p11-windows-index-service.md): implementation and remaining real-machine lifecycle evidence; performance work deferred.
 - [P12 — Installed trial feedback](2026-10-14-p12-installed-trial-feedback.md): local prototype work; another computer's C/E failure remains unreproduced.
 - [P13 — Desktop bilingual](2026-10-15-p13-desktop-bilingual.md): language settings and versioned prototype evidence.

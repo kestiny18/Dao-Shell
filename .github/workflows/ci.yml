@@ -17,7 +17,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: rustup show
       - run: cargo fmt --check
-      - run: cargo test --locked --all-targets
+      - if: runner.os == 'Windows'
+        run: ./scripts/check-ci-windows-token.ps1
+      - run: cargo test --locked --all-targets -- --nocapture
       - if: runner.os == 'Windows'
         run: cargo clippy --locked --all-targets -- -D warnings
   desktop:
@@ -27,7 +29,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: rustup show
       - run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
-      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+      - run: ./scripts/check-ci-windows-token.ps1
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked -- --nocapture
       - run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo build --manifest-path desktop/src-tauri/Cargo.toml --locked
       - run: npm ci --prefix desktop

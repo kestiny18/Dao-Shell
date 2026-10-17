@@ -259,7 +259,12 @@ mod tests {
         };
         save(&t.exe.to_string_lossy(), "");
         let parsed = parse_link(&t.link).expect("safe synthetic shortcut");
-        assert_eq!(parsed.exe, t.exe);
+        // Shell resolution may expand an 8.3 TEMP path on Windows runners.
+        assert_eq!(
+            parsed.exe.canonicalize().unwrap(),
+            t.exe.canonicalize().unwrap()
+        );
+        assert!(parsed.identity.same_object(&t.identity));
         save(&t.exe.to_string_lossy(), "--uninstall");
         assert!(parse_link(&t.link).is_none());
         assert!(

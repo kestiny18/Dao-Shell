@@ -6,7 +6,7 @@
 
 Find local files, understand your computer and continue from real results. The Windows desktop preview combines a local overview with conversations and file search. A separate CLI supports guarded file moves.
 
-[Try the preview](docs/GETTING_STARTED.md) · [Documentation](docs/README.en.md) · [Roadmap](ROADMAP.md) · [Share a use case](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
+[Download v0.1.0 for Windows](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0) · [Get started](docs/GETTING_STARTED.md) · [Documentation](docs/README.en.md) · [Roadmap](ROADMAP.md) · [Share a use case](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
 
 ![Dao-Shell interaction concept: search, review a CLI move plan, and confirm locally.](docs/assets/dao-shell-preview.en.svg)
 
@@ -38,7 +38,7 @@ A direct click on a current candidate uses the system default `open` handler, in
 
 This is an **unsigned Windows 10/11 x64 development preview**, not a stable release or completed independent acceptance. A local installer of about 9.1 MB has been built with an embedded WebView2 bootstrapper; an existing runtime is reused, while a missing runtime requires internet access to download it from Microsoft. A machine without either WebView2 or internet needs the standalone runtime first.
 
-This repository preparation does not upload an installer. Use a maintainer-provided trial package or [build from source](desktop/README.md). Public release artifacts should identify their source revision, checksum and verification scope. The existing local P13 package predates the repository preparation; a formal release should be rebuilt from the final commit.
+Download the installer and SHA256 checksum from the [v0.1.0 release](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0), or [build from source](desktop/README.md). Release notes identify the source revision, verification scope and known limits. The release installer is rebuilt from tagged source; the previous local P13 package remains historical trial evidence.
 
 Implemented features, isolated self-tests and real-machine evidence are recorded separately. Another Windows computer was reported basically usable, but persistent C/E volume indexing failures there remain **NOT_REPRODUCED**, not confirmed fixed. Service upgrade/rollback/restart and clean-machine installation evidence remains incomplete; search-time optimization is deferred. See the [current index plan](docs/plans/2026-10-10-p11-windows-index-service.md), [trial-feedback record](docs/devlog/2026-10-14-p12-trial-feedback.md) and [bilingual record](docs/devlog/2026-10-15-p13-desktop-bilingual.md).
 

@@ -6,7 +6,7 @@ This is a Windows 10/11 x64 development preview. The desktop supports English an
 
 ## Desktop first run
 
-Use a maintainer-provided `Dao-Shell-0.1.0-windows-x64-setup.exe`, or build it using the [desktop instructions](../desktop/README.md). This work has produced a local P13 trial package, not uploaded a public release. Its approximately 9.1 MB installer reuses WebView2 or downloads it through Microsoft's bundled bootstrapper; missing WebView2 requires internet or prior standalone runtime installation.
+Download `Dao-Shell-0.1.0-windows-x64-setup.exe` and its `.sha256` file from the [v0.1.0 release](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0), or build using the [desktop instructions](../desktop/README.md). Check the installer with `Get-FileHash -Algorithm SHA256`. The small installer reuses WebView2 or downloads it through Microsoft's bundled bootstrapper; missing WebView2 requires internet or prior standalone runtime installation.
 
 1. Open Overview for local CPU/memory rankings, disks, network interfaces and registered apps. Reading the overview does not automatically request a model. Process ending requires a separate confirmation and may lose unsaved work; unknown/protected identities are refused.
 2. Choose Settings → General & appearance → Interface language. Follow system uses Simplified Chinese for Chinese Windows UI languages and English otherwise; a manual choice takes priority after Save. History, paths and custom titles are not translated.
@@ -34,7 +34,7 @@ Set-Location target\release
 .\daosh.exe --help
 ```
 
-The [development guide](DEVELOPMENT.md) (Chinese) describes the toolchain and a local Windows bootstrap option. Future downloads will appear on [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases), with their verification scope stated.
+The [development guide](DEVELOPMENT.md) (Chinese) describes the toolchain and a local Windows bootstrap option. The v0.1.0 uploaded installer is for the desktop; build the CLI separately using the commands above.
 
 Run the examples below in **PowerShell**, from the directory containing `daosh.exe`. If your prompt is `C:\...>` instead of `PS C:\...>`, enter `powershell` first. CMD handles single quotes differently.
 

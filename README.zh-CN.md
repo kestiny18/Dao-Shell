@@ -6,7 +6,7 @@
 
 找到本机文件，了解电脑状态，沿着真实结果继续操作。Windows 桌面预览把电脑概览、会话和文件搜索放在一起；独立 CLI 另提供带确认和记录的小批量移动。
 
-[开始体验](docs/GETTING_STARTED.zh-CN.md) · [文档导航](docs/README.md) · [路线图](ROADMAP.md) · [反馈场景](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
+[下载 Windows v0.1.0](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0) · [开始体验](docs/GETTING_STARTED.zh-CN.md) · [文档导航](docs/README.md) · [路线图](ROADMAP.md) · [反馈场景](https://github.com/kestiny18/Dao-Shell/issues/new?template=use_case.yml)
 
 ![Dao-Shell 交互示意：查找文件，查看 CLI 移动方案，由用户确认。](docs/assets/dao-shell-preview.svg)
 
@@ -38,7 +38,7 @@
 
 这是 **Windows 10/11 x64 未签名开发预览**，不是稳定版，也没有完成独立完整验收。已构建约 9.1 MB 的本地安装包，内置小型 WebView2 引导程序；已有运行环境会复用，缺少时需联网从微软下载。缺少运行环境且无法联网时，需要先安装独立运行环境。
 
-本轮仓库整理不上传安装包。可使用维护者提供的试用包，或按 [桌面开发说明](desktop/README.md) 构建。公开产物应标明来源版本、SHA 和验证范围；现有本地 P13 包先于本轮整理构建，正式发布应从最终提交重新打包。
+从 [v0.1.0 发布页](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0) 下载安装包和 SHA256 校验文件，或按 [桌面开发说明](desktop/README.md) 构建。发布说明列出来源提交、验证范围和已知限制；发行安装包从打标签的源码重新构建，之前本地 P13 包保留为历史试用证据。
 
 实现、自测与实机证据分别记录。另一台 Windows 的“基本可用”为用户反馈，其中 C/E 卷持续更新失败仍为 **NOT_REPRODUCED**，不能说已经修复。真实服务升级、回滚、重启与干净机器安装等证据尚不完整；查询耗时优化已暂缓。见 [索引服务当前计划](docs/plans/2026-10-10-p11-windows-index-service.md)、[试用反馈记录](docs/devlog/2026-10-14-p12-trial-feedback.md) 和 [双语记录](docs/devlog/2026-10-15-p13-desktop-bilingual.md)。
 

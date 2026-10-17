@@ -1,5 +1,39 @@
 use super::*;
 use std::{fs, thread};
+mod ordinary_token;
+use ordinary_token::ordinary_child;
+
+#[test]
+fn restricted_child_runs_real_ipc_auth_cursor_incremental_and_restart() {
+    ordinary_token::run("ordinary_ipc_auth_cursor_incremental_and_restart").unwrap();
+}
+
+#[test]
+fn fixture_rejects_elevated_token_before_opening_database() {
+    if !security::current().unwrap().elevated {
+        return; // The ordinary-token behavior is covered by the real IPC test above.
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("fixture");
+    fs::create_dir(&root).unwrap();
+    let db = temp.path().join("index.db");
+    let result = run(
+        Config {
+            mode: Mode::Fixture(root),
+            database: db.clone(),
+            pipe: uuid::Uuid::new_v4().to_string(),
+            max_resolutions: 1,
+        },
+        Cancellation::default(),
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("without elevation")
+    );
+    assert!(!db.exists());
+}
 
 #[test]
 fn exited_maintenance_preserves_publication_but_replaces_rebuildable_error() {
@@ -150,6 +184,9 @@ fn crash_during_owned_fixture_transaction() {
 }
 #[test]
 fn abrupt_process_exit_preserves_published_snapshot() {
+    if ordinary_child("abrupt_process_exit_preserves_published_snapshot") {
+        return;
+    }
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("fixture");
     fs::create_dir(&root).unwrap();
@@ -253,9 +290,38 @@ impl Drop for Running {
     fn drop(&mut self) {
         self.stop.cancel();
         if let Some(thread) = self.thread.take() {
-            thread.join().unwrap().unwrap();
+            let result = thread.join();
+            // Preserve the first failure instead of aborting on a second panic in Drop.
+            if !std::thread::panicking() {
+                result.unwrap().unwrap();
+            }
         }
     }
+}
+#[test]
+fn worker_cleanup_joins_failed_thread_without_masking_original_panic() {
+    let panic = std::panic::catch_unwind(|| {
+        let _running = Running {
+            stop: Cancellation::default(),
+            thread: Some(thread::spawn(|| anyhow::bail!("synthetic worker failure"))),
+            pipe: String::new(),
+        };
+        panic!("synthetic original failure");
+    });
+    assert_eq!(
+        panic.unwrap_err().downcast_ref::<&str>(),
+        Some(&"synthetic original failure")
+    );
+    assert!(
+        std::panic::catch_unwind(|| {
+            drop(Running {
+                stop: Cancellation::default(),
+                thread: Some(thread::spawn(|| anyhow::bail!("synthetic worker failure"))),
+                pipe: String::new(),
+            });
+        })
+        .is_err()
+    );
 }
 impl Running {
     fn start(root: &Path, db: &Path) -> Self {
@@ -317,6 +383,9 @@ impl Running {
 }
 #[test]
 fn ordinary_ipc_auth_cursor_incremental_and_restart() {
+    if ordinary_child("ordinary_ipc_auth_cursor_incremental_and_restart") {
+        return;
+    }
     assert!(!security::current().unwrap().elevated);
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("fixture");
@@ -388,6 +457,9 @@ fn ordinary_ipc_auth_cursor_incremental_and_restart() {
 }
 #[test]
 fn ordinary_volume_mode_fails_before_creating_unprotected_database() {
+    if ordinary_child("ordinary_volume_mode_fails_before_creating_unprotected_database") {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("index.db");
     assert!(
@@ -407,6 +479,9 @@ fn ordinary_volume_mode_fails_before_creating_unprotected_database() {
 
 #[test]
 fn silent_clients_expire_and_release_all_pipe_instances() {
+    if ordinary_child("silent_clients_expire_and_release_all_pipe_instances") {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("fixture");
     fs::create_dir(&root).unwrap();
@@ -431,6 +506,9 @@ fn silent_clients_expire_and_release_all_pipe_instances() {
 
 #[test]
 fn ipc_hides_names_when_ancestor_listing_is_denied() {
+    if ordinary_child("ipc_hides_names_when_ancestor_listing_is_denied") {
+        return;
+    }
     use std::ptr;
     use windows_sys::Win32::{
         Foundation::LocalFree,
@@ -551,6 +629,9 @@ fn rebuild_single_slot_rate_limit_and_stop_are_explicit() {
 }
 #[test]
 fn ordinary_authenticated_rebuild_publishes_once_and_does_not_touch_source() {
+    if ordinary_child("ordinary_authenticated_rebuild_publishes_once_and_does_not_touch_source") {
+        return;
+    }
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("fixture");
     fs::create_dir(&root).unwrap();

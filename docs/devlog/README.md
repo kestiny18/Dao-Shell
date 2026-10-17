@@ -4,6 +4,7 @@
 
 ## Recent implementation checkpoints
 
+- [2026-10-17 release checks](2026-10-17-p15-release-0.1.0.md): Windows CI fixture fixes and the 0.1.0 release evidence.
 - [2026-10-15 repository preparation](2026-10-15-p14-repository-preparation.md): behavior-preserving help/documentation cleanup and local repository handoff.
 - [2026-10-15 bilingual desktop](2026-10-15-p13-desktop-bilingual.md): explicit language settings, isolated native checks and local package provenance.
 - [2026-10-14 trial feedback](2026-10-14-p12-trial-feedback.md): overview/process/search/open behavior and another machine's unresolved C/E failure.

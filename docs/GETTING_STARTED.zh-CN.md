@@ -6,7 +6,7 @@
 
 ## 先体验桌面
 
-使用维护者提供的 `Dao-Shell-0.1.0-windows-x64-setup.exe`，或按 [桌面说明](../desktop/README.md) 构建。本轮有本地 P13 试用包，不代表已经上传公开发行版。约9.1 MB的小包会复用 WebView2，缺少时通过内置微软引导程序下载；缺少运行环境时需要联网或预先安装独立运行环境。
+从 [v0.1.0 发布页](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0) 下载 `Dao-Shell-0.1.0-windows-x64-setup.exe` 和对应的 `.sha256` 文件，用 `Get-FileHash -Algorithm SHA256` 核对安装包；也可按 [桌面说明](../desktop/README.md) 构建。小包复用 WebView2，缺少时通过内置微软引导程序下载；缺少运行环境时需要联网或预先安装独立运行环境。
 
 1. 在概览查看 CPU/内存双榜、磁盘、网络接口与登记应用；概览不自动请求模型。结束进程另需明确确认，可能丢失未保存内容；未知/受保护身份拒绝操作。
 2. 在设置 → 通用与外观 → 界面语言中选择跟随系统、简体中文或English。跟随系统时，中文Windows使用简中，其余英文；手动选择保存后优先。历史文字、路径和自定义标题不翻译。
@@ -24,7 +24,7 @@
 
 ## 获取程序
 
-CLI可按 [开发指南](DEVELOPMENT.md) 从源码构建；构建后程序在 `target/release/daosh.exe`，打包目录在 `dist/daosh-0.1.0-windows-x64/`。后续下载入口会放在 [GitHub Releases](https://github.com/kestiny18/Dao-Shell/releases)，并标明验证范围。
+CLI可按 [开发指南](DEVELOPMENT.md) 从源码构建；构建后程序在 `target/release/daosh.exe`，打包目录在 `dist/daosh-0.1.0-windows-x64/`。v0.1.0 发布页上传的是桌面安装包，CLI 请单独构建。
 
 下面的示例需要 **PowerShell**，在 `daosh.exe` 所在目录运行。如果当前提示符是 `C:\...>` 而非 `PS C:\...>`，先输入 `powershell`。CMD 不会按 PowerShell 规则处理单引号。
 

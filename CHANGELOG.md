@@ -2,7 +2,13 @@
 
 记录已经发生的变化；尚未完成的计划放在 [Roadmap](ROADMAP.md)。当前没有稳定版发布。
 
-## Unreleased — 第一版公开开发预览
+## 0.1.0 — 2026-10-17 — 第一版公开开发预览
+
+Windows x64 双语桌面开发预览，使用小型 WebView2 引导安装包。公开产物、源码标签、校验值和验证范围见 [v0.1.0](https://github.com/kestiny18/Dao-Shell/releases/tag/v0.1.0)。服务生命周期与远端卷故障等既有限制保留，不代表稳定版或完整独立验收。
+
+### 2026-10-17
+
+- Prepare source-bound Windows release assets and bilingual download instructions. Release checks include the remote Windows/Ubuntu CI results and exact artifact hashes; known preview limitations remain explicit.
 
 ### 2026-10-15
 

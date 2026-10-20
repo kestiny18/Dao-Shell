@@ -99,11 +99,11 @@ also works with a configured system toolchain. It does not install dependencies
 or change your global PATH. There is no Node frontend build step.
 
 Try “找一下项目里的合同 PDF”, then click a current candidate to open it.
-The input uses the configured model automatically. Without a model, or when its
-connection is unavailable before any tool call, it falls back once to local filename
-search using the original input. The notice explains that this literal search does
-not understand natural language. Cancellation, permission refusal, protocol/tool
-errors and failures after a tool call never trigger this fallback. Stop cancels the current request; New session creates an independent conversation. A current candidate click goes directly to the Windows default open handler, including
+The input uses the configured model automatically. Natural-language requests require
+that model; missing connections and model errors no longer silently search for the
+whole sentence as a filename. Use **File-name search** for explicit literal search,
+or **Local computer status** for the five read-only query types without a model.
+ Stop cancels the current request; New session creates an independent conversation. A current candidate click goes directly to the Windows default open handler, including
 HTML, executable and other associated types, without a second app confirmation.
 Executable files run with ordinary OS semantics; no verb, parameters or elevation
 request is generated from model text. Model-initiated file_open still asks locally.
@@ -234,8 +234,9 @@ Installer implementation reference: [Tauri Windows distribution](https://v2.taur
 See the [experiment record](../docs/experiments/desktop-entry.md) for boundaries and evidence.
 
 
-Computer profile loads only when expanded or explicitly refreshed, is cached in
-this window, and never enters model facts or workspace history. It reads CPU and
+The overview computer profile loads only when expanded or explicitly refreshed
+and remains local. The explicit chat computer_profile query described below can
+share its whitelisted hardware subset after local sharing is enabled. It reads CPU and
 memory via sysinfo, Windows firmware manufacturer/product registry values, and
 EnumDisplayDevices adapter descriptions. Missing/OEM placeholder values remain
 unknown; display adapters may be virtual. Storage lists individual volume capacities
@@ -489,3 +490,47 @@ silently turn an exclusion into a rule over another user directory.
 MFT/USN may still traverse all volume records. Skipped expensive resolutions are
 operation counts, not unique file counts, and this candidate makes no measured
 performance claim. macOS/Linux collection policies are not implemented here.
+
+
+## Phase 1 computer queries (local prototype)
+
+Chat now provides read-only CPU/memory/volume-space observations, process pages,
+network interface rates, registered applications (including conservative running
+matches), and hardware configuration with current uptime. Application launch,
+termination and installation are not model tools.
+
+Settings → Access → Computer information sharing is separate from file access.
+Old configurations default to Ask. The first attempted computer tool shows a
+local permission card; Allow and remember saves the choice, then retry the original
+request. Keep local only disables sending these facts. The setting applies to the
+current and subsequently selected model; the composer displays the actual connection.
+System configuration, metrics and selected program names/versions may be shared;
+command lines, environment variables, PID/native identities, IP/MAC, host names,
+full program paths, icons and action references are excluded by runtime projection.
+Turning sharing off or changing model/settings clears execution contexts and live
+observation references while retaining visible text history.
+
+Local computer status requires neither sharing nor a model. Select the query type;
+process/app queries offer explicit name filtering, process ordering and the
+installed/running application view. Observation cards show collection time,
+sample window and coverage limits. Refresh and Next page call fixed local queries
+without a model. CPU and memory rankings share one sample; follow-up references
+can reuse it. File candidates and computer observations remain separate.
+
+Observations are session-owned, expire after ten minutes and are bounded to twelve
+groups/eight MiB. At most 2,048 process rows are retained; a page contains at most
+fifty rows. Registered app directories may be cached for sixty seconds and hardware
+profiles for five minutes, retaining their original collection times. Uptime and
+running evidence are not reused as static facts. Restart restores text receipts,
+not full data, pagination tokens or live references.
+
+Run the isolated fixed-local-model WebView self-test after building:
+
+```powershell
+node scripts/computer-query-smoke.mjs .tools/my-new-computer-query-trial desktop/src-tauri/target/debug/dao-shell-desktop.exe
+```
+
+The directory must be new. It creates its own configuration, inert file fixture,
+local model server and WebView profile, writes bounded evidence/screenshots locally,
+and closes its own desktop. It never uses saved credentials or calls a cloud model.
+See [Phase 1 evidence](../docs/devlog/2026-10-20-phase1-computer-query.md).

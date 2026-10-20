@@ -67,11 +67,12 @@ src/
   runtime.rs        # 执行、权限、持久写操作要求
   runtime/control.rs # 请求互斥、取消、一次性确认
   computer.rs       # 本地电脑概览，带覆盖限制和采样时间
-  capabilities.rs   # 六项能力的描述和参数分发
+  capabilities.rs   # CLI/桌面能力目录与桌面准入
   files.rs          # 范围、查询、对象引用
   operations.rs     # 准备、确认、执行、核验、取消
   storage.rs        # SQLite 操作记录与实例锁
   platform/         # Windows 句柄操作
+  observation.rs    # 只读电脑观测、白名单投影与会话缓存
   resources.rs      # 资源与进程采样
 tests/              # 确定性边界与协议测试
 scripts/            # 开发、打包和入口检查

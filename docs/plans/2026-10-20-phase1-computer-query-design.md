@@ -1,12 +1,12 @@
 # 第一期设计：自然语言电脑状态查询
 
 Date: 2026-10-20
-Implementation: IN_PROGRESS
-Self-test: PENDING
+Implementation: READY
+Self-test: PASS (Windows local prototype; see implementation evidence)
 Independent testing: NOT_RUN
 Independent review: NOT_RUN
 Authorization: 2026-10-20 用户批准第一期开发及小步提交；不推送、不发布。当前实现基线 f36cee668f7e927403054fec1e12d7ed40e5d9fa。
-Delivery: 设计与后续实施任务。
+Delivery: 第一期只读原型。实现、自测与已知局限见 [交付记录](../devlog/2026-10-20-phase1-computer-query.md)。
 Parent: [分期方案](2026-10-20-computer-capabilities-roadmap.md)
 
 ## 1. 产品目标与范围
@@ -195,28 +195,28 @@ Reply 兼容保留 `items/search_receipt`，新增 `observations`（缺失默认
 ## 8. 实施任务及完成条件
 
 ### T1 — 能力策略与信息共享
-Implementation: IN_PROGRESS
+Implementation: READY
 
 - 能力目录驱动桌面 schema/提示/执行检查；旧文件和 CLI 行为有明确 profile。
 - 配置缺字段兼容 ask；本地授权卡、设置入口、模型切换与关闭共享后的上下文清理生效。
 - 覆盖伪造工具、伪造授权、配置保存竞态、概览解释绕过与恶意数据文本。
 
 ### T2 — 采集与观测契约
-Implementation: IN_PROGRESS
+Implementation: READY
 
 - 五个只读工具可独立调用；按域采集，统一时间/口径/错误/覆盖与投影。
 - 同窗双榜、网络计数边界、应用保守关联、分页绑定与缓存上限有确定性检查。
 - 应用/网络/配置的未知不会变为零或“未运行”。
 
 ### T3 — 桌面交互与追问
-Implementation: IN_PROGRESS
+Implementation: READY
 
 - 五类卡、双语文案、取消、重查、分页、事件去重与会话归属可用。
 - 文件候选保持兼容；观测引用不跨会话、不跨重启；文本历史可恢复。
 - 无模型和工具后模型失败均有可见本地结果/入口，不静默按文件名搜索。
 
 ### T4 — 自测与原型交付
-Implementation: IN_PROGRESS
+Implementation: READY
 
 - 运行受影响的 Rust、模型协议、桥接/UI 测试与必要桌面构建；新增边界用模拟响应和受控数据，读取实机信息只验证普通权限采集，不操作真实程序。
 - 记录来源 HEAD 加相关工作区差异、命令与结果；按实现、自测、独立验证分别报告。
@@ -241,5 +241,15 @@ Implementation: IN_PROGRESS
 
 第一期原型完成后才可标 Implementation: READY，需必要自测通过。独立 testing/review 默认 NOT_RUN；仅用户要求时启动。
 
-当前只是设计，未验证 Windows 不同版本/权限下的采集覆盖、真实模型工具选择、性能预算及界面体验。公开发布和第二期应用操作不在本轮范围。建议实施顺序 T1 → T2 → T3 → T4，交付一个完整只读闭环后停止。
+本期已实现并通过本机普通权限、自有隔离配置、固定本地模型和 WebView 自测。不同 Windows 版本/权限、真实云模型的自然语言工具选择与解释质量、长时间压力和干净机器仍为 NOT_VERIFIED。公开发布和第二期应用操作不在本轮范围。当前授权范围已完成，不继续扩展。
 
+
+
+## 10. 实现对照（2026-10-20）
+
+- T1：统一桌面 allowlist 同时约束 schema 和 Runtime；共享 ask/enabled/disabled 与文件权限独立；本地保存沿用 revision 和请求互斥；关闭后重建会话与模型上下文。
+- T2：新增会话 `observation::Store`、有界分页/缓存、白名单模型投影和格式化事实；沿用现有资源/配置采集并开放按需应用查询。磁盘独立快路径无 CPU 等待；普通安装目录查询不提取图标或采进程。CPU/内存同次采样可供后续复用。
+- T3：五种观测卡、明确本地查询、授权卡、设置、刷新/分页、双语和历史文本回执；自然语言失败不再隐式搜索文件。观测事件和最终 Reply 沿用 Bridge 的 session_id/execution_id 绑定并按 observation_id/页去重。
+- T4：核心和桌面测试、Clippy、UI 全集、Debug 构建及隔离真实 WebView 的 16 项固定模型试用完成。真实云模型问题包保持 NOT_VERIFIED，不以固定模型试用替代。
+
+实现选择：静态目录/配置缓存在每个会话有界观测库内复用，不新增全局采集服务。`computer.rs` 保持小型现有文件结构，仅开放参数化只读采集函数；没有为了形式拆出 provider 平台。原始行引用在采集集合分配，显示排行序号与不透明引用分别维护。缓存复用保留原采集 Instant，不通过重复查询延长 TTL。局部采样之外的领域不能借旧 observation_id 补采或假装已采集。

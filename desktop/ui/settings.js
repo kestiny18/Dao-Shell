@@ -129,6 +129,7 @@ async function loadSettings() {
     settingsView = await api.invoke('get_settings'); settingsLoaded = true; savedAccessMode=settingsView.config.access_mode;
     pendingKeys.clear(); selectedModel = settingsView.config.models.choices[0]?.id || null;
     $('access-mode').value = settingsView.config.access_mode;
+    $('computer-query-sharing').value = settingsView.config.computer_query_sharing || 'ask';
     renderDirectories();
     $('appearance').value = settingsView.config.appearance;
     $('ui-language').value = settingsView.config.ui_language || 'auto';
@@ -191,6 +192,7 @@ $('settings-form').addEventListener('submit', async (event) => {
   storeModel(); renderActiveModels();
   const config = settingsView.config;
   const newlyFull=savedAccessMode!=='full' && $('access-mode').value==='full';
+  config.computer_query_sharing = $('computer-query-sharing').value;
   config.access_mode = $('access-mode').value; config.appearance = $('appearance').value; config.ui_language=$('ui-language').value;
   setBusy(true);
   try {

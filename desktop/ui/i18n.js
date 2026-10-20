@@ -1,5 +1,55 @@
 /* Only explicit built-in message keys are translated. User data is never scanned. */
 const messages = {
+ "computer.working":{"zh":"正在查询电脑状态……","en":"Reading computer status…"},
+ "computer.status.ok":{"zh":"已完成","en":"Completed"},
+ "computer.status.partial":{"zh":"部分覆盖","en":"Partial"},
+ "computer.example_memory":{"zh":"内存谁占得最多？","en":"Which processes use the most memory?"},
+ "computer.example_disk":{"zh":"C 盘还剩多少空间？","en":"How much space is available on C:?"},
+ "computer.example_running":{"zh":"正在运行哪些程序？","en":"Which programs are running?"},
+  "computer.coverage": {"zh": "覆盖", "en": "Coverage"},
+  "computer.limits": {"zh": "范围与局限", "en": "Scope and limits"},
+  "computer.limits.resources": {"zh": "CPU 为窗口平均、内存为终点读数、卷空间为读取时点；双榜使用同次采样。进程不可访问指标保持未知；进程排名不能解释全部系统内存，不含 GPU、磁盘 I/O 或历史，不足以确定卡顿根因。", "en": "CPU is a window average; memory is read at the end; volumes are read at collection. Both rankings share a sample. Unreadable process metrics remain unknown. Rankings do not explain all system memory. GPU, disk I/O and history are excluded; no root-cause conclusion."},
+  "computer.limits.apps": {"zh": "仅当前用户和本机 32/64 位卸载注册表登记；可能含组件，不完整覆盖 Store 或便携应用。大小是登记估算。仅独占完整可执行路径与可读进程一致才确认运行，其他情况未知，不代表未运行。", "en": "Current-user and machine 32/64-bit uninstall registry entries only; components may appear and Store/portable apps may be missing. Size is a registered estimate. Running is confirmed only for a uniquely registered full executable path matching a readable process; other cases are unknown."},
+  "computer.limits.network": {"zh": "接口计数差除以实际采样间隔；新增、消失或计数回退会标记不完整/未知。配置 IP 不等于互联网可用；未主动联网探测。", "en": "Counter deltas divided by actual elapsed time; added, disappeared or reset interfaces produce incomplete/unknown readings. IP configuration does not establish internet connectivity. No active probes."},
+  "computer.limits.profile": {"zh": "只读硬件摘要，不含机器标识；显卡型号不等于利用率；缺失字段未知。缓存保留原采集时间，运行时长单独读取。", "en": "Read-only hardware summary without machine identifiers. Graphics models are not utilization. Missing fields remain unknown. Cached facts keep their original collection time; uptime is read separately."},
+  "computer.reason.provider_scoped_observation": {"zh": "提供者限定范围", "en": "Provider-scoped observation"},
+  "computer.reason.registry_access_incomplete": {"zh": "注册表读取不完整", "en": "Incomplete registry reads"},
+  "computer.reason.process_paths_unavailable": {"zh": "部分进程路径不可读", "en": "Some process paths unreadable"},
+  "computer.reason.row_budget": {"zh": "达到进程保存上限", "en": "Process retention limit reached"},
+  "computer.reason.process_metrics_unavailable": {"zh": "部分进程指标未知", "en": "Some process metrics unknown"},
+  "computer.reason.counter_changed": {"zh": "接口集合或计数变化", "en": "Interface set or counters changed"},
+
+ "computer.name":{"zh":"名称","en":"Name"},
+ "computer.memory":{"zh":"内存","en":"Memory"},
+ "computer.running":{"zh":"运行中 ✓","en":"Running ✓"},
+ "computer.cached":{"zh":"缓存观测","en":"Cached observation"},
+  "computer.file_search": {"zh": "文件名搜索", "en": "File-name search"},
+  "computer.local": {"zh": "查看电脑状态", "en": "Local computer status"},
+  "computer.resources": {"zh": "CPU / 内存 / 磁盘", "en": "CPU / memory / disks"},
+  "computer.processes": {"zh": "运行进程", "en": "Running processes"},
+  "computer.network": {"zh": "网络接口", "en": "Network interfaces"},
+  "computer.apps": {"zh": "已登记应用", "en": "Registered apps"},
+  "computer.profile": {"zh": "电脑配置", "en": "Computer profile"},
+  "computer.query": {"zh": "查询", "en": "Query"},
+  "computer.sharing": {"zh": "电脑信息共享", "en": "Computer information sharing"},
+  "computer.privacy": {"zh": "系统配置、资源指标、程序名称和版本等可能发送给当前及之后选择的模型。不发送命令行、环境变量、IP/MAC、主机名或完整程序路径。本地查询无需开启。", "en": "System configuration, resource metrics and program names/versions may be sent to your current and future selected models. Command lines, environment variables, IP/MAC, host names and full program paths are excluded. Local viewing does not require sharing."},
+  "computer.ask": {"zh": "首次使用时询问", "en": "Ask on first use"},
+  "computer.enabled": {"zh": "允许发送给所选模型", "en": "Allow sharing with selected models"},
+  "computer.disabled": {"zh": "仅本地查看", "en": "Local viewing only"},
+  "computer.allow": {"zh": "允许并记住", "en": "Allow and remember"},
+  "computer.deny": {"zh": "暂不启用", "en": "Keep local only"},
+  "computer.retry": {"zh": "已启用后，请重试原请求。", "en": "After enabling, retry your original request."},
+  "computer.refresh": {"zh": "重新查询", "en": "Refresh"},
+  "computer.next": {"zh": "下一页", "en": "Next page"},
+  "computer.unknown": {"zh": "未知", "en": "Unknown"},
+  "computer.history": {"zh": "历史观测；详细数据和引用不持久保存，需要重新查询。", "en": "Historical observation; details and references are not saved. Query again."},
+  "computer.scope": {"zh": "只读局部观测；短时采样不能确定根因。登记应用不覆盖所有软件；网络接口状态不代表互联网可用。", "en": "Read-only scoped observation. Short samples cannot establish root cause. Registered apps do not cover all software; interface status does not establish internet connectivity."},
+  "computer.permission_required": {"zh": "需要本地启用电脑信息共享；本次没有采集或发送。", "en": "Enable computer information sharing locally. No computer data was collected or sent by this request."},
+  "computer.permission_denied": {"zh": "电脑信息共享已关闭，可本地查看或在设置开启。", "en": "Computer sharing is disabled. View locally or enable it in Settings."},
+  "computer.error": {"zh": "查询未完成，请重试或重新查询过期观测。", "en": "Query incomplete. Retry or refresh expired observations."},
+  "computer.window": {"zh": "采样窗口", "en": "Sample window"},
+  "computer.filter": {"zh": "名称包含（可留空）", "en": "Name contains (optional)"},
+
   "app.ready": {
     "zh": "准备就绪",
     "en": "Ready"
@@ -1517,8 +1567,8 @@ const messages = {
     "en": "Which file are you looking for?"
   },
   "ui.find_a_file_in_one_sentence_e_g_find_the_contract_pdf_in_my_proj": {
-    "zh": "用一句话找到文件，比如：找一下项目里的合同 PDF",
-    "en": "Find a file in one sentence, e.g. find the contract PDF in my project"
+    "zh": "查找文件，或询问电脑状态",
+    "en": "Find files or ask about computer status"
   },
   "ui.reading_model_settings": {
     "zh": "正在读取模型配置",
@@ -2230,6 +2280,8 @@ function localBuiltin(value) {
 }
 function errorText(value) {
   const text=String(value ?? '');
+  if (['permission_required','permission_denied'].includes(text)) return t(`computer.${text}`);
+  if (['invalid_arguments','observation_expired','unsupported','timeout','internal_error','observation_budget_exceeded'].includes(text)) return t('computer.error');
   if(uiLanguage==='zh-CN')return text;
   const exact=builtinMessageKeys.get(text);if(exact)return t(exact);
   if(text.startsWith('目录记录无法加载：'))return t('inventory.load_failed');

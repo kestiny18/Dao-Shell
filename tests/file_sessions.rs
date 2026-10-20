@@ -11,6 +11,131 @@ use std::fs;
 struct Ui {
     confirmations: usize,
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn local_computer_queries_need_no_sharing_and_preserve_files_and_sample_references() {
+    use serde_json::json;
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(temp.path().join("synthetic.txt"), "fixture").unwrap();
+    let config = Config {
+        read_roots: vec![temp.path().into()],
+        computer_query_sharing: dao_shell::config::ComputerQuerySharing::Disabled,
+        ..Default::default()
+    };
+    let mut s = FileSession::new(&config, Cancellation::default()).unwrap();
+    let mut ui = Ui::default();
+    let first = s.execute(Action::Search("synthetic".into()), &mut ui).await;
+    let file_id = first.items[0].id.clone();
+    let query = |tool: &str, arguments| Action::QueryComputer {
+        tool: tool.into(),
+        arguments,
+    };
+    let resources = s
+        .execute(
+            query(
+                "resource_snapshot",
+                json!({"sections":["cpu","memory"],"sample_ms":500,"limit":2}),
+            ),
+            &mut ui,
+        )
+        .await;
+    assert!(!resources.error, "{}", resources.message);
+    assert_eq!(resources.items[0].id, file_id);
+    let obs = &resources.observations[0];
+    let id = obs["observation_id"].clone();
+    let at = obs["observed_at"].clone();
+    assert_eq!(
+        obs["data"]["process_rankings"]["cpu"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(obs["data"]["system"].get("disks").is_none());
+    s.execute(Action::Search("synthetic".into()), &mut ui).await;
+    let reused = s
+        .execute(
+            query(
+                "resource_snapshot",
+                json!({"observation_id":id,"sections":["cpu"],"limit":1}),
+            ),
+            &mut ui,
+        )
+        .await;
+    assert!(!reused.error);
+    assert_eq!(reused.observations[0]["observed_at"], at);
+    assert!(
+        reused.observations[0]["data"]["system"]
+            .get("memory_used_bytes")
+            .is_none()
+    );
+    assert!(
+        reused.observations[0]["data"]["facts_for_explanation"]["system"]
+            .get("memory_used")
+            .is_none()
+    );
+    let mut other = FileSession::new(&config, Cancellation::default()).unwrap();
+    assert!(
+        other
+            .execute(
+                query("resource_snapshot", json!({"observation_id":id})),
+                &mut ui
+            )
+            .await
+            .error
+    );
+    let explain = s
+        .execute(
+            Action::ExplainComputer(json!({"host":"private","system":{"cpu_percent":4}})),
+            &mut ui,
+        )
+        .await;
+    assert!(explain.error);
+    assert!(explain.message.contains("permission_denied"));
+    s.execute(Action::Reset, &mut ui).await;
+    assert!(
+        s.execute(
+            query("resource_snapshot", json!({"observation_id":id})),
+            &mut ui
+        )
+        .await
+        .error
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread")]
+async fn five_local_read_only_tools_have_timestamped_contracts_and_no_action_references() {
+    use serde_json::json;
+    let mut s = FileSession::new(&Config::default(), Cancellation::default()).unwrap();
+    let mut ui = Ui::default();
+    for (tool, args) in [
+        ("resource_snapshot", json!({"sections":["disks"]})),
+        ("process_list", json!({"sample_ms":500,"limit":2})),
+        ("network_snapshot", json!({"sample_ms":500})),
+        ("app_list", json!({"limit":2})),
+        ("computer_profile", json!({})),
+    ] {
+        let reply = s
+            .execute(
+                Action::QueryComputer {
+                    tool: tool.into(),
+                    arguments: args,
+                },
+                &mut ui,
+            )
+            .await;
+        assert!(!reply.error, "{tool}: {}", reply.message);
+        assert_eq!(reply.observations.len(), 1);
+        let v = &reply.observations[0];
+        assert!(v["observed_at"].is_string());
+        assert!(v["observation_id"].is_string());
+        let text = v.to_string();
+        assert!(!text.contains("termination_ref"));
+        assert!(!text.contains("action_id"));
+        assert!(!text.contains("created_filetime"));
+    }
+}
 impl Interaction for Ui {
     fn confirm_move(&mut self, _: &Operation) -> anyhow::Result<bool> {
         panic!("file entry must never prepare a move")

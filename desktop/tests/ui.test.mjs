@@ -9,7 +9,7 @@ const file = { id:'internal-object-id', path:'C:\\fixture\\合同 <script>.txt',
 async function fixture(options = {}) {
   const dom = new JSDOM(await readFile(new URL('../ui/index.html', import.meta.url), 'utf8'), { runScripts:'outside-only', url:'http://tauri.localhost/' });
   const w = dom.window; w.TextEncoder = TextEncoder; w.HTMLElement.prototype.scrollIntoView = function () {};
-  const calls = []; let current = { revision:'original', credential_available:[], config:{ read_roots:['C:\\fixture'], write_roots:[], access_mode:'restricted', appearance:'light', model:null, models:{ connections:[{id:'local',label:'Local',endpoint:'http://127.0.0.1:12345/v1/chat/completions',api_key_env:''}], choices:[{id:'fixture',connection_id:'local',name:'fixture-model'}],active:'fixture' } } };
+  const calls = []; let current = { revision:'original', credential_available:[], config:{ computer_query_sharing:options.sharing || 'enabled', read_roots:['C:\\fixture'], write_roots:[], access_mode:'restricted', appearance:'light', model:null, models:{ connections:[{id:'local',label:'Local',endpoint:'http://127.0.0.1:12345/v1/chat/completions',api_key_env:''}], choices:[{id:'fixture',connection_id:'local',name:'fixture-model'}],active:'fixture' } } };
   if (options.settings) current = clone(options.settings);
   let pending = null;
   let savedWorkspace = options.workspace || {version:1,sessions:[],tabs:['home'],active:'home',sidebar_width:205,collapsed:false,home_draft:''};
@@ -36,6 +36,7 @@ async function fixture(options = {}) {
     if (command === 'computer_overview') return {system:{cpu_percent:12.5,memory_used_bytes:1024,memory_total_bytes:2048,memory_available_bytes:1024,disks:[{mount:'C:\\',total_bytes:4096,available_bytes:2048}]},device:{host:'Fixture computer',os:'Fixture OS',uptime_seconds:3600,architecture:'x86_64'},logical_cpus:2,observed_at:'2026-09-21T10:00:00Z',network:{adapters:[],limits:'Fixture counters'},applications:{items:[{name:'<img src=x onerror=alert(1)>',version:'1'}],available:true,partial:true,limits:'Partial fixture'}};
     if (command === 'perform') {
       const emit = event => args.onEvent.onmessage({...event,session_id:args.sessionId,execution_id:args.requestId}); events.push(emit);
+      if (options.perform) return options.perform(args,emit);
       if (args.input === 'slow') return new Promise((resolve) => { pending = resolve; });
       const items = args.input === 'absent' ? [] : [file];
       if(options.searchReceipt) return {message:'fixture response',error:false,items,search_receipt:{items,...options.searchReceipt}};
@@ -46,7 +47,7 @@ async function fixture(options = {}) {
     if (command === 'cancel') { if (!options.deferCancel) pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['i18n.js','app.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['i18n.js','app.js','computer-query.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -93,6 +94,40 @@ test('home remains local, renders facts and treats application names as text', a
   assert.match(f.$('app-note').textContent,/部分注册表/);
   f.$('explain-home').click();await f.tick();
   assert.equal(f.calls.find((c)=>c.command==='perform').args.kind,'explain');
+});
+
+test('computer observation event/final deduplicate, render untrusted names as text and persist only visible receipts',async(t)=>{
+  const observation={observation_id:'sample-1',kind:'app_list',status:'partial',observed_at:'2026-10-20T10:00:00Z',coverage:{state:'partial',reasons:['process_paths_unavailable']},data:{items:[{row_ref:'sample-1:87',name:'<img src=x onerror=alert(1)>',version:'1.2',publisher:'Fixture',estimated_size_bytes:1073741824,running:null}]},page:{returned:1,matched:1},query:{tool:'app_list',arguments:{name:'Fixture'}}};
+  const f=await fixture({perform:async(args,emit)=>{emit({kind:'result',capability:'app_list',value:observation});return {message:'complete',error:false,items:[],observations:[observation]};}});t.after(()=>f.dom.window.close());
+  f.$('input').value='apps';f.submit('composer');await f.tick();
+  assert.equal(f.$('computer-observations').children.length,1);assert.equal(f.$('computer-observations').querySelector('img'),null);
+  assert.match(f.$('computer-observations').textContent,/1\.2/);assert.match(f.$('computer-observations').textContent,/1.00 GiB/);assert.match(f.$('computer-observations').textContent,/部分进程路径不可读/);
+  const messages=f.saved().sessions[0].messages;assert.equal(messages.filter(m=>m.role==='receipt').length,1);assert(!messages.some(m=>'observations' in m || 'data' in m));
+  assert.match(messages.find(m=>m.role==='receipt').text,/历史观测/);
+});
+
+test('sharing permission card requires explicit local choice and never silently replays the request',async(t)=>{
+  const f=await fixture({sharing:'ask',perform:async(args,emit)=>{const value={status:'error',error:'permission_required'};emit({kind:'result',capability:'computer_profile',value});return {message:'Permission required',error:false,items:[],observations:[value]};}});t.after(()=>f.dom.window.close());
+  f.$('input').value='profile';f.submit('composer');await f.tick();
+  const card=f.$('computer-observations');assert.match(card.textContent,/需要本地启用/);
+  assert.equal(f.calls.filter(c=>c.command==='save_settings').length,0);
+  [...card.querySelectorAll('button')].find(b=>b.textContent==='允许并记住').click();await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='save_settings').at(-1).args.update.config.computer_query_sharing,'enabled');
+  assert.equal(f.calls.filter(c=>c.command==='perform').length,1);assert.match(f.$('workspace-status').textContent,/重试/);
+});
+
+test('overview explanation cannot bypass disabled sharing and local tool controls remain explicit',async(t)=>{
+  const f=await fixture({sharing:'disabled'});t.after(()=>f.dom.window.close());
+  f.$('explain-home').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+  assert.match(f.$('computer-observations').textContent,/共享已关闭/);
+  f.change('local-computer-tool','app_list');f.$('local-computer-filter').value='Python';f.change('local-computer-view','running');f.$('local-computer-query').click();await f.tick();
+  const call=f.calls.filter(c=>c.command==='perform').at(-1);assert.equal(call.args.kind,'computer');assert.deepEqual(JSON.parse(call.args.input),{tool:'app_list',arguments:{name:'Python',view:'running'}});
+  assert.equal(f.calls.filter(c=>c.command==='save_settings').length,0);
+});
+
+test('cancelled or invalid computer query errors do not offer an authorization action',async(t)=>{
+  const f=await fixture({perform:async()=>({message:'cancelled',error:true,items:[],observations:[{error:'cancelled',status:'error'}]})});t.after(()=>f.dom.window.close());
+  f.$('local-computer-query').click();await f.tick();assert.equal(f.$('computer-observations').querySelectorAll('button').length,0);
 });
 
 test('overview shows every application, stable running priority, estimates and unknowns in both views', async (t) => {

@@ -127,7 +127,7 @@ impl Store {
                 .is_none_or(|s| matches!(s, "installed" | "running")),
             "invalid_arguments"
         );
-        let sections = r
+        let mut sections = r
             .sections
             .clone()
             .unwrap_or_else(|| vec!["cpu".into(), "memory".into(), "disks".into()]);
@@ -238,9 +238,31 @@ impl Store {
             ensure!(data["available"] != false, "unsupported");
             cancel.check()?;
             ensure!(began.elapsed() < Duration::from_secs(10), "timeout");
-            let partial = data["partial"] == true
-                || data["matched_processes"].as_u64().is_some_and(|n| n > 2048);
-            let mut value = json!({"schema_version":1,"observation_id":uuid::Uuid::new_v4().to_string(),"kind":tool,"status":if partial {"partial"} else {"ok"},"observed_at":data["observed_at"],"sample_window":if data.get("started_at").is_some() {json!({"started_at":data["started_at"],"ended_at":data["observed_at"],"elapsed_ms":data["sample_ms"]})} else {Value::Null},"source":"local_windows","coverage":{"state":"partial","reasons":["provider_scoped_observation"]},"cached":data["cached"] == true,"limits":data["limits"],"data":data,"page":null});
+            let mut reasons = vec!["provider_scoped_observation"];
+            if data["matched_processes"].as_u64().is_some_and(|n| n > 2048) {
+                reasons.push("row_budget");
+            }
+            if data["processes"].as_array().is_some_and(|rows| {
+                rows.iter()
+                    .any(|p| p["memory_bytes"].is_null() || p["cpu_percent_total"].is_null())
+            }) {
+                reasons.push("process_metrics_unavailable");
+            }
+            if data["partial"] == true {
+                reasons.push(if tool == "network_snapshot" {
+                    "counter_changed"
+                } else {
+                    "registry_access_incomplete"
+                });
+            }
+            if data["unreadable_process_paths"]
+                .as_u64()
+                .is_some_and(|n| n > 0)
+            {
+                reasons.push("process_paths_unavailable");
+            }
+            let partial = reasons.len() > 1;
+            let mut value = json!({"schema_version":1,"observation_id":uuid::Uuid::new_v4().to_string(),"kind":tool,"status":if partial {"partial"} else {"ok"},"observed_at":data["observed_at"],"sample_window":if data.get("started_at").is_some() {json!({"started_at":data["started_at"],"ended_at":data["observed_at"],"elapsed_ms":data["sample_ms"]})} else {Value::Null},"metric_metadata":{"cpu":"window_average_total_machine_percent","memory":"end_of_window_reading","disks":"collection_time_volume_space"},"source":"local_windows","coverage":{"state":"partial","reasons":reasons},"cached":data["cached"] == true,"limits":data["limits"],"data":data,"page":null});
             let id = value["observation_id"].as_str().unwrap().to_owned();
             for key in ["processes", "items"] {
                 if let Some(rows) = value["data"][key].as_array_mut() {
@@ -345,6 +367,18 @@ impl Store {
             value["data"][key] = json!(page);
         }
         if tool == "resource_snapshot" {
+            if let Some(collected) = value["data"]["collected_sections"].as_array() {
+                if reused && r.sections.is_none() {
+                    sections = collected
+                        .iter()
+                        .filter_map(|s| s.as_str().map(str::to_owned))
+                        .collect();
+                }
+                ensure!(
+                    sections.iter().all(|s| collected.iter().any(|v| v == s)),
+                    "observation_expired"
+                );
+            }
             if let Some(system) = value["data"]["system"].as_object_mut() {
                 if !sections.iter().any(|s| s == "cpu") {
                     system.remove("cpu_percent");
@@ -449,6 +483,7 @@ pub fn model_projection(local: &Value) -> Value {
             "error",
             "observed_at",
             "sample_window",
+            "metric_metadata",
             "source",
             "coverage",
             "cached",
@@ -495,6 +530,7 @@ pub fn model_projection(local: &Value) -> Value {
                         } else {
                             "Volume".into()
                         });
+                        v["mount"] = v["volume"].clone();
                         v
                     })
                     .collect::<Vec<_>>()
@@ -570,6 +606,25 @@ pub fn model_projection(local: &Value) -> Value {
         }
         _ => (),
     }
+    match local["kind"].as_str().unwrap_or("") {
+        "app_list" => {
+            data["view"] = d["view"].clone();
+            data["facts_for_explanation"]["items"] = json!(data["items"].as_array().into_iter().flatten().map(|r| json!({"row_ref":r["row_ref"],"estimated_size":crate::presentation::human_bytes(&r["estimated_size_bytes"])})).collect::<Vec<_>>());
+        }
+        "network_snapshot" => {
+            let rate_text = |v: &Value| {
+                v.as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.)
+                    .map(|n| format!("{n:.0} B/s"))
+                    .unwrap_or_else(|| "Unknown".into())
+            };
+            data["facts_for_explanation"]["adapters"] = json!(data["adapters"].as_array().into_iter().flatten().map(|r| json!({"label":r["label"],"received":rate_text(&r["received_bytes_per_second"]),"transmitted":rate_text(&r["transmitted_bytes_per_second"])})).collect::<Vec<_>>());
+        }
+        "computer_profile" => {
+            data["facts_for_explanation"] = json!({"memory":crate::presentation::human_bytes(&data["memory_bytes"]),"uptime":data["uptime_seconds"].as_u64().map(|n|format!("{n} s")),"uptime_observed_at":data["uptime_observed_at"]});
+        }
+        _ => (),
+    }
     out["data"] = data;
     // Truncate complete rows, never JSON bytes. Fixed metric fields are small.
     while serde_json::to_vec(&out).is_ok_and(|b| b.len() > 32 * 1024) {
@@ -577,6 +632,9 @@ pub fn model_projection(local: &Value) -> Value {
         for key in ["items", "processes", "adapters"] {
             if let Some(a) = out["data"][key].as_array_mut() {
                 removed |= a.pop().is_some();
+            }
+            if let Some(a) = out["data"]["facts_for_explanation"][key].as_array_mut() {
+                a.pop();
             }
         }
         out["projection_truncated"] = json!(true);

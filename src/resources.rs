@@ -69,7 +69,7 @@ pub fn query_snapshot(
         let disks = Disks::new_with_refreshed_list();
         let rows: Vec<_> = disks.iter().map(|d| serde_json::json!({"mount":d.mount_point(),"total_bytes":(d.total_space()>0).then_some(d.total_space()),"available_bytes":(d.total_space()>0).then_some(d.available_space())})).collect();
         return Ok(
-            serde_json::json!({"observed_at":now(),"system":{"disks":rows},"limits":"Volume space only; capacities are not summed physical disk capacity."}),
+            serde_json::json!({"observed_at":now(),"collected_sections":["disks"],"system":{"disks":rows},"limits":"Volume space only; capacities are not summed physical disk capacity."}),
         );
     }
     let mut value = collect(
@@ -83,6 +83,12 @@ pub fn query_snapshot(
         false,
         Some(sections),
     )?;
+    value["collected_sections"] =
+        serde_json::json!(if !processes && sections.iter().any(|s| s == "disks") {
+            vec!["cpu", "memory", "disks"]
+        } else {
+            vec!["cpu", "memory"]
+        });
     value["facts_for_explanation"] = explanation_facts(&value);
     Ok(value)
 }

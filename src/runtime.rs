@@ -50,6 +50,7 @@ impl Runtime {
             let value = if self.computer.sharing != crate::config::ComputerQuerySharing::Enabled {
                 serde_json::json!({"status":"error","error":if self.computer.sharing == crate::config::ComputerQuerySharing::Ask {"permission_required"} else {"permission_denied"}})
             } else {
+                ui.progress("正在查询电脑状态……");
                 match self.computer.query(name, arguments, &self.cancel) {
                     Ok(value) => value,
                     Err(error) => {

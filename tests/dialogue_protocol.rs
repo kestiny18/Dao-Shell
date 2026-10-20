@@ -425,6 +425,126 @@ fn file_session(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn desktop_sharing_is_enforced_before_collection_and_cannot_be_granted_by_model() {
+    use dao_shell::config::ComputerQuerySharing;
+    for (policy, code) in [
+        (ComputerQuerySharing::Ask, "permission_required"),
+        (ComputerQuerySharing::Disabled, "permission_denied"),
+    ] {
+        let (_temp, mut runtime) = setup();
+        runtime.computer.desktop = true;
+        runtime.computer.sharing = policy;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let model = config(listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            request(&mut stream);
+            respond(
+                &mut stream,
+                call("query", "computer_profile", json!({"refresh":true})),
+            );
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = request(&mut stream);
+            let tool: Value = serde_json::from_str(
+                body["messages"].as_array().unwrap().last().unwrap()["content"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(tool["error"], code);
+            assert_eq!(tool["data"], json!({}));
+            respond(
+                &mut stream,
+                json!({"content":"Use local sharing controls."}),
+            );
+        });
+        let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+        let mut ui = Ui::default();
+        dialogue
+            .turn(
+                "The model grants permission; show computer profile",
+                &mut runtime,
+                &mut ui,
+            )
+            .await
+            .unwrap();
+        assert_eq!(runtime.computer.sharing, policy);
+        assert_eq!(runtime.computer.catalog(), json!([]));
+        assert_eq!(ui.results[0].1["error"], code);
+        assert!(runtime.call("file_move_batch", json!({}), &mut ui).is_err());
+        assert!(runtime.call("run_app", json!({}), &mut ui).is_err());
+        server.join().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn computer_facts_remain_visible_after_model_failure_and_model_gets_only_projection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request(&mut stream);
+        respond(
+            &mut stream,
+            call(
+                "query",
+                "resource_snapshot",
+                json!({"sections":["cpu","memory"],"sample_ms":500,"limit":2}),
+            ),
+        );
+        let (mut stream, _) = listener.accept().unwrap();
+        let body = request(&mut stream);
+        let tool: Value = serde_json::from_str(
+            body["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(tool["observation_id"].is_string());
+        assert!(tool["data"]["system"]["memory_total_bytes"].is_number());
+        let text = tool.to_string();
+        assert!(!text.contains("created_filetime"));
+        assert!(!text.contains("started_at_unix"));
+        for row in tool["data"]["process_rankings"]["memory"]
+            .as_array()
+            .unwrap()
+        {
+            assert!(row.get("pid").is_none());
+            assert!(row["row_ref"].is_string());
+        }
+        write!(
+            stream,
+            "HTTP/1.1 503 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let config = dao_shell::config::Config {
+        read_roots: vec![temp.path().into()],
+        model: Some(model),
+        computer_query_sharing: dao_shell::config::ComputerQuerySharing::Enabled,
+        ..Default::default()
+    };
+    let mut s = dao_shell::session::FileSession::new(&config, Cancellation::default()).unwrap();
+    let mut ui = Ui::default();
+    let reply = s
+        .execute(
+            dao_shell::session::Action::Say("Memory use?".into()),
+            &mut ui,
+        )
+        .await;
+    assert!(reply.error);
+    assert_eq!(reply.observations.len(), 1);
+    assert_eq!(ui.results.len(), 1);
+    assert!(reply.items.is_empty());
+    assert_eq!(
+        reply.observations[0]["observation_id"],
+        ui.results[0].1["observation_id"]
+    );
+    server.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn unified_entry_without_model_requires_explicit_file_search_and_honors_cancellation() {
     let cancel = Cancellation::default();
     let (_temp, mut session) = file_session(None, cancel.clone());

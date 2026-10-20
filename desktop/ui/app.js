@@ -15,7 +15,7 @@ let saveLoop = null;
 let pendingSave = null;
 const pageScroll = new Map();
 function session(id = workspace.active) { return workspace.sessions.find(s => s.id === id); }
-function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false}); return runtime.get(id); }
+function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false,observations:[]}); return runtime.get(id); }
 function pathText(path) { return String(path).replace(/^\\\\\?\\/, ''); }
 function nameOf(path) { return pathText(path).split(/[\\/]/).pop() || pathText(path); }
 function persistenceNotice(text) { $('workspace-status').textContent = text; $('workspace-status').hidden = !text; }
@@ -155,6 +155,7 @@ function renderCurrent() {
   $('welcome').hidden = Boolean(s?.messages.length);
   $('context-notice').hidden = !st?.contextLost;
   candidates(st?.items || []);
+  if (typeof renderObservations === "function") renderObservations(st?.observations || []);
   $('input').value = s?.draft ?? (currentPage === 'home' ? workspace.home_draft : '');
   renderedTab = workspace.active;
   $('activity').textContent = builtinText(st?.activity) || (activeRequest ? t('app.another_session_is_running_you_can_switch_to_it_or_stop_it') : t('app.ready'));
@@ -190,7 +191,7 @@ function message(text, role = 'assistant', error = false, id = workspace.active)
 }
 function closeConfirmation(id = workspace.active) { if (runtime.has(id)) state(id).confirmation = null; if (workspace.active === id) $('confirmation').hidden = true; }
 function invalidateContexts() {
-  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.confirmation = null; st.contextLost = true; }
+  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.observations = []; st.confirmation = null; st.contextLost = true; }
   renderCurrent();
 }
 function applySearchReceipt(value,request) {
@@ -218,9 +219,10 @@ function onEvent(event, request) {
   if (event.kind === 'progress') st.activity = localBuiltin(event.text);
   if (event.kind === 'context_reset') {
     for (const item of event.configuration_changed ? workspace.sessions : [session(request.sessionId)]) {
-      const previous = state(item.id); previous.items = []; previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
+      const previous = state(item.id); previous.items = []; previous.observations = []; previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
     }
   }
+  if (event.kind === 'result' && ['resource_snapshot','process_list','network_snapshot','app_list','computer_profile'].includes(event.capability)) applyObservation(event.value,request);
   if (event.kind === 'result' && event.capability === 'file_search') applySearchReceipt(event.value,request);
   if (event.kind === 'result' && event.capability === 'file_open') message(localBuiltin(event.value.message) || t('app.open_request_processed'),'receipt',false,request.sessionId);
   if (event.kind === 'confirm_open' && !request.stopping) { st.confirmation = {...event,executionId:request.id}; st.activity = t('app.waiting_for_your_confirmation'); }
@@ -238,6 +240,7 @@ async function newSession() {
   finally { creating = false; }
 }
 async function run(kind,input = '') {
+  if (kind === 'explain' && !await ensureComputerSharing()) return;
   if (busy || !api || !ready || mutatingWorkspace) return;
   let id = session()?.id;
   if (!id) { id = await newSession(); if (!id || busy) return; workspace.home_draft = ''; }
@@ -252,6 +255,7 @@ async function run(kind,input = '') {
     try {
       const reply = await api.invoke('perform',{sessionId:id,requestId:request.id,kind,input,onEvent:channel});
       if (activeRequest !== request || !session(id)) return;
+      for (const value of reply.observations || []) applyObservation(value,request);
       if (reply.search_receipt) applySearchReceipt(reply.search_receipt,request);
       if (!['open','open-selected'].includes(kind) || reply.error) message(reply.error ? errorText(reply.message) : reply.message,'assistant',reply.error,id);
       state(id).items = request.stopping ? [] : reply.items;

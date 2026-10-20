@@ -236,3 +236,8 @@ html[lang="en"] .brand-name small { white-space: normal; }
 .index-volume-controls select { width: 100%; max-width: 100%; min-width: 0; }
 .index-volume-controls button { max-width: 100%; white-space: normal; }
 .index-volume p { overflow-wrap: anywhere; margin: 8px 0 0; }
+
+.computer-shortcuts { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+.computer-shortcuts label {display:flex;align-items:center;gap:6px;}
+.observation-lines {white-space:pre-wrap; overflow-wrap:anywhere; max-height:340px; overflow:auto; font-size:13px;}
+.computer-observation button {margin:6px 6px 0 0;}

@@ -320,6 +320,13 @@ impl Bridge {
         }
         let action = match kind {
             "say" => Action::Say(input),
+            "computer" => {
+                let value: Value = serde_json::from_str(&input).map_err(|_| "invalid_arguments")?;
+                Action::QueryComputer {
+                    tool: value["tool"].as_str().ok_or("invalid_arguments")?.into(),
+                    arguments: value.get("arguments").cloned().unwrap_or_else(|| json!({})),
+                }
+            }
             "search" => Action::Search(input),
             "open" => Action::Open(input),
             "open-selected" => Action::OpenSelected(input),

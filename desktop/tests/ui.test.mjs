@@ -730,6 +730,38 @@ test('stopped incompatible and disconnected services give manual recovery guidan
  }
 });
 
+test('collection inclusion is explicit per-volume and pending scope never masquerades as published in either language',async(t)=>{
+ for(const language of ['zh-CN','en']) {
+  const key='d'.repeat(32)+'-00000004';let requested='windows_default_v1';
+  const f=await fixture({systemLanguage:language,indexService:async args=>{if(args.action==='set-policy'){requested='windows_all_v1';return {state:'accepted'};}return {state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['C:\\'],supported:true,worker_started:true,pipe:'volume-'+key,index_status:{phase:requested==='windows_all_v1'?'rebuild_queued':'ready',generation:4,requested_policy:requested,policy:{id:'windows_default_v1',excluded_roots:4,skipped_resolutions:120,categories:['system_temp']}}}]};}});t.after(()=>f.dom.window.close());
+  f.$('input').value='fixture';f.submit('composer');await f.tick();const id=f.w.eval('workspace.active');assert.equal(f.w.eval(`state(${JSON.stringify(id)}).items.length`),1);
+  f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+  let row=f.$('index-service-volumes').firstElementChild;assert.ok(row.classList.contains('index-volume'));assert.ok(row.querySelector('.index-volume-summary'));assert.ok(row.querySelector('.index-volume-controls'));
+  let select=row.querySelector('select');assert.match(select.getAttribute('aria-label'),/C:/);assert.equal(select.value,'false');select.value='true';
+  row.querySelectorAll('button')[1].click();await f.tick();assert.equal(f.$('decision').hidden,false);f.$('decision-no').click();await f.tick();assert.equal(f.calls.filter(c=>c.args.action==='set-policy').length,0);assert.equal(f.w.eval(`state(${JSON.stringify(id)}).items.length`),1);
+  row.querySelectorAll('button')[1].click();await f.tick();f.$('decision-yes').click();await f.tick();
+  const call=f.calls.find(c=>c.args.action==='set-policy');assert.equal(call.args.includeSystemFiles,true);assert.equal(call.args.confirmed,true);assert.equal(call.args.deleteIndex,false);assert.equal(call.args.volumeKey,key);
+  assert.equal(f.w.eval(`state(${JSON.stringify(id)}).items.length`),0);assert.equal(f.w.eval(`state(${JSON.stringify(id)}).confirmation`),null);assert.equal(f.w.eval(`state(${JSON.stringify(id)}).contextLost`),true);
+  const text=f.$('index-service-volumes').textContent;assert.match(text,language==='en'?/Published scope: Standard scope/:/已发布范围：普通范围/);assert.match(text,language==='en'?/Requested scope: Include system/:/待应用范围：包含系统/);assert.match(text,language==='en'?/not unique files/:/非唯一文件数/);assert.match(text,language==='en'?/AppData, ProgramData/:/AppData、ProgramData/);
+  assert.equal(f.calls.some(c=>c.command==='save_settings'||['install','upgrade'].includes(c.args.action)),false);
+ }
+});
+
+test('collection save failure retains reported actual scope and clears possibly stale candidates',async(t)=>{
+ const f=await fixture({indexService:async args=>{if(args.action==='set-policy')throw Error('synthetic save failure');return {state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['E:\\'],supported:true,worker_started:true,pipe:'volume-'+'e'.repeat(32)+'-00000005',index_status:{phase:'ready',generation:2,requested_policy:'windows_default_v1',policy:{id:'windows_default_v1'}}}]};}});t.after(()=>f.dom.window.close());
+ f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();const row=f.$('index-service-volumes').firstElementChild;row.querySelector('select').value='true';row.querySelectorAll('button')[1].click();await f.tick();f.$('decision-yes').click();await f.tick();assert.match(f.$('index-service-status').textContent,/synthetic save failure/);f.$('index-refresh').click();await f.tick();assert.equal(f.$('index-service-volumes').querySelector('select').value,'false');assert.match(f.$('index-service-volumes').textContent,/已发布范围：普通范围/);assert.equal(f.calls.some(c=>c.command==='save_settings'),false);
+});
+
+test('collection scope distinguishes first build from legacy publication in both languages',async(t)=>{
+ for(const language of ['zh-CN','en']) {
+  const f=await fixture({systemLanguage:language,indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['C:\\'],index_status:{phase:'building',generation:null,policy:null,requested_policy:'windows_default_v1'}},{mounts:['E:\\'],index_status:{phase:'error',generation:0,policy:null,requested_policy:'windows_default_v1'}},{mounts:['F:\\'],index_status:{phase:'error',generation:4,policy:null,requested_policy:'windows_default_v1'}}]})});t.after(()=>f.dom.window.close());
+  f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();const rows=f.$('index-service-volumes').children;
+  assert.match(rows[0].textContent,language==='en'?/No published collection scope/:/尚无已发布范围/);assert.doesNotMatch(rows[0].textContent,/Legacy index scope|旧索引范围/);
+  for(const row of [rows[1],rows[2]]) {assert.match(row.textContent,language==='en'?/Legacy index scope/:/旧索引范围/);assert.doesNotMatch(row.textContent,/No published collection scope|尚无已发布范围/);}
+  assert.ok(f.calls.filter(call=>call.command==='index_service_command').every(call=>call.args.action==='status'));
+ }
+});
+
 test('budget recovery and final limit show bounded progress and details in both languages',async(t)=>{
  for(const language of ['zh-CN','en']) {
   const f=await fixture({systemLanguage:language,indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['C:\\'],index_status:{phase:'budget_retrying',error:'budget_increasing_retrying',generation:42,updated_unix_ms:1700000000000,diagnostic:{stage:'budget_metadata',code:'budget_metadata_exhausted',raw:'SECRET'}}},{mounts:['E:\\'],index_status:{phase:'error',error:'budget_limit_exhausted',diagnostic:{code:'budget_enumeration_exhausted'}}},{mounts:['F:\\'],index_status:{phase:'error',error:'budget_limit_exhausted',diagnostic:{code:'budget_catchup_exhausted'}}}]})});t.after(()=>f.dom.window.close());

@@ -560,6 +560,22 @@ const messages = {
     "zh": "正在扩大处理预算并重试",
     "en": "Increasing the processing budget and retrying"
   },
+  "settings.policy_rebuilding": {"zh":"范围边界变化，正在重新记录","en":"Collection boundary changed; rebuilding"},
+  "settings.policy_rebuild_required": {"zh":"收集范围尚未就绪，请应用范围并重新记录；旧代次保留","en":"Collection scope is not ready; apply the scope and rebuild. The previous generation is retained"},
+  "settings.policy_boundary_changed": {"zh":"目录跨越排除边界或规则目录变化，正在有界恢复","en":"A directory crossed an exclusion boundary or a rule directory changed; bounded recovery is in progress"},
+  "settings.policy_configuration_failed": {"zh":"收集范围配置失败，请刷新状态；不要假定新范围已生效","en":"Collection scope configuration failed; refresh status. Do not assume the new scope is active"},
+  "settings.policy_location_unavailable": {"zh":"部分排除目录无法可靠定位，相关内容未被当作已排除","en":"Some exclusion directories could not be verified; their contents have not been treated as excluded"},
+  "settings.policy_default": {"zh":"普通范围（排除明确系统内部及缓存）","en":"Standard scope (exclude identified system internals and caches)"},
+  "settings.policy_all": {"zh":"包含系统内部及缓存","en":"Include system internals and caches"},
+  "settings.policy_legacy": {"zh":"旧索引范围（尚无排除策略记录）","en":"Legacy index scope (no recorded exclusion policy)"},
+  "settings.policy_no_publication": {"zh":"尚无已发布范围","en":"No published collection scope"},
+  "settings.policy_published": {"zh":"已发布范围：{v0}","en":"Published scope: {v0}"},
+  "settings.policy_pending": {"zh":"待应用范围：{v0}；等待有效新代次","en":"Requested scope: {v0}; waiting for a valid new generation"},
+  "settings.policy_counts": {"zh":"已绑定排除目录 {v0} 个；跳过昂贵解析 {v1} 次（非唯一文件数）","en":"Bound exclusion directories: {v0}; expensive resolutions skipped: {v1} (not unique files)"},
+  "settings.policy_collect_scope": {"zh":"此卷收集范围","en":"Collection scope for this volume"},
+  "settings.policy_apply": {"zh":"应用并重新记录","en":"Apply and rebuild"},
+  "settings.policy_note": {"zh":"完整性相对于已发布范围。普通范围保留 AppData、ProgramData、用户文件及应用入口。包含模式需重新记录，不扩大读取或打开权限；自身索引文件始终排除。MFT/USN 仍可能遍历卷记录。","en":"Completeness is relative to the published scope. Standard scope retains AppData, ProgramData, user files and application entries. Inclusion requires rebuilding and does not expand read or open permissions. Index storage is always excluded. MFT/USN may still traverse volume-wide records."},
+  "settings.policy_confirm": {"zh":"将此卷切换为“{v0}”并重新记录？成功前保留旧代次，范围不同期间搜索需等待新代次。不会删除源文件或扩大访问权限。","en":"Switch this volume to “{v0}” and rebuild? The previous generation is retained until success; searches wait while the requested scope differs. Source files and access permissions are unchanged."},
   "settings.index_budget_increasing": {
     "zh": "尚未发布本轮索引；正在有上限地扩大预算重试，旧索引保留",
     "en": "This update is not published yet; retrying with a larger bounded budget. The previous index is retained"

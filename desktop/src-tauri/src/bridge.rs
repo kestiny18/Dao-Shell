@@ -170,6 +170,23 @@ impl Bridge {
     pub fn settings(&self) -> Result<SettingsView, String> {
         settings::read(&self.path()).map_err(error)
     }
+    pub fn set_index_policy(
+        &self,
+        key: &str,
+        include: bool,
+        confirmed: bool,
+    ) -> Result<Value, String> {
+        if !confirmed {
+            return Err("请在本地设置中确认收集范围变更及重新记录".into());
+        }
+        self.reserve()?;
+        let _release = Release(self);
+        // A timed-out request may already have been accepted by the service.
+        self.sessions.lock().map_err(error)?.contexts.clear();
+        self.index_service
+            .set_policy(key, include, confirmed)
+            .map_err(error)
+    }
     pub fn save(&self, update: SettingsUpdate) -> Result<SettingsView, String> {
         self.reserve()?;
         let _release = Release(self);
@@ -449,6 +466,33 @@ impl Interaction for DesktopInteraction<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn collection_policy_reserves_requests_invalidates_candidates_and_preserves_access_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let config = Config {
+            read_roots: vec![temp.path().to_path_buf()],
+            ..Default::default()
+        };
+        config.save(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let bridge = Bridge::with_path(path.clone());
+        bridge.sessions.lock().unwrap().contexts.insert(
+            "owned".into(),
+            FileSession::new(&config, dao_shell::core::Cancellation::default()).unwrap(),
+        );
+        assert!(bridge.set_index_policy("invalid", true, false).is_err());
+        assert_eq!(bridge.sessions.lock().unwrap().contexts.len(), 1);
+        bridge.reserve().unwrap();
+        assert!(bridge.set_index_policy("invalid", true, true).is_err());
+        assert_eq!(bridge.sessions.lock().unwrap().contexts.len(), 1);
+        drop(Release(&bridge));
+        assert!(bridge.set_index_policy("invalid", true, true).is_err());
+        assert!(bridge.sessions.lock().unwrap().contexts.is_empty());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        bridge.reserve().unwrap();
+        drop(Release(&bridge));
+    }
     #[test]
     fn process_confirmation_holds_admission_invalid_tokens_cannot_release_and_cancel_revokes_it() {
         let dir = tempfile::tempdir().unwrap();

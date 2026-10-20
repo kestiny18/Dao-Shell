@@ -1,4 +1,5 @@
 use super::{ntfs_io as io, usn, *};
+pub(crate) mod exclusions;
 use anyhow::Context;
 use std::{
     collections::HashSet,
@@ -99,9 +100,101 @@ pub struct WindowsVolumeSource {
     known_files: HashSet<String>,
     deletion_hints: HashSet<String>,
     excluded: HashSet<String>,
+    policy: Option<exclusions::Exclusions>,
     pub metrics: Metrics,
 }
 impl WindowsVolumeSource {
+    pub(crate) fn configure_policy(&mut self, include: bool) -> Result<()> {
+        self.policy = Some(exclusions::Exclusions::new(
+            include,
+            &self.guid,
+            self.serial,
+        )?);
+        Ok(())
+    }
+    pub(crate) fn refresh_policy(&mut self) {
+        if let Some(policy) = &mut self.policy {
+            policy.refresh(&self.guid, self.serial);
+        }
+    }
+    fn directory_path(&self, id: u64) -> Result<String> {
+        let descriptor = FILE_ID_DESCRIPTOR {
+            dwSize: size_of::<FILE_ID_DESCRIPTOR>() as u32,
+            Type: FileIdType,
+            Anonymous: FILE_ID_DESCRIPTOR_0 { FileId: id as i64 },
+        };
+        let raw = unsafe {
+            OpenFileById(
+                self.file.as_raw_handle() as _,
+                &descriptor,
+                FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                ptr::null(),
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            )
+        };
+        ensure!(
+            raw != INVALID_HANDLE_VALUE,
+            "policy parent identity unavailable"
+        );
+        let file = unsafe { File::from_raw_handle(raw as _) };
+        let value = info(&file)?;
+        ensure!(
+            file_id(&value) == id
+                && value.dwVolumeSerialNumber == self.serial
+                && value.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0
+                && value.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0
+                && handle_guid(&file)?.eq_ignore_ascii_case(&self.guid),
+            "policy parent changed"
+        );
+        exclusions::path(&file)
+    }
+    fn boundary_changed(&self, records: &[usn::Record]) -> bool {
+        let Some(policy) = &self.policy else {
+            return false;
+        };
+        if policy.descriptor().id == exclusions::ALL {
+            return false;
+        }
+        let mut pairs =
+            std::collections::HashMap::<u64, (Option<&usn::Record>, Option<&usn::Record>)>::new();
+        for record in records
+            .iter()
+            .filter(|r| r.attributes & FILE_ATTRIBUTE_DIRECTORY != 0 && r.reason & 0x3000 != 0)
+        {
+            if pairs.len() >= 256 && !pairs.contains_key(&record.id) {
+                return true;
+            }
+            let pair = pairs.entry(record.id).or_default();
+            if record.reason & 0x1000 != 0 {
+                pair.0 = Some(record);
+            }
+            if record.reason & 0x2000 != 0 {
+                pair.1 = Some(record);
+            }
+        }
+        for (old, new) in pairs.values() {
+            let (Some(old), Some(new)) = (old, new) else {
+                return true;
+            };
+            if pairs.contains_key(&old.parent) || pairs.contains_key(&new.parent) {
+                return true;
+            }
+            let (Ok(before), Ok(after)) = (
+                self.directory_path(old.parent),
+                self.directory_path(new.parent),
+            ) else {
+                return true;
+            };
+            if policy.moved(
+                &format!("{before}\\{}", old.name),
+                &format!("{after}\\{}", new.name),
+            ) {
+                return true;
+            }
+        }
+        policy.changed()
+    }
     pub fn id_for_path(&self, path: &std::path::Path) -> Result<String> {
         ensure!(path.is_absolute(), "fixture path must be absolute");
         let file = open_path(path.to_str().context("non-Unicode fixture path")?)?;
@@ -201,6 +294,7 @@ impl WindowsVolumeSource {
             known_files: HashSet::new(),
             deletion_hints: HashSet::new(),
             excluded: HashSet::new(),
+            policy: None,
             metrics: Metrics::default(),
         })
     }
@@ -245,6 +339,27 @@ impl WindowsVolumeSource {
         }
         let file = unsafe { File::from_raw_handle(raw as _) };
         let before = info(&file).context("metadata: before")?;
+        ensure!(
+            file_id(&before) == native && before.dwVolumeSerialNumber == self.serial,
+            "file identity mismatch"
+        );
+        if let Some(policy) = &mut self.policy
+            && before.nNumberOfLinks == 1
+            && before.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0
+            && let Ok(path) = exclusions::path(&file)
+            && policy.excludes(&path)
+        {
+            let after = info(&file)?;
+            ensure!(
+                file_id(&after) == native
+                    && after.dwVolumeSerialNumber == self.serial
+                    && after.nNumberOfLinks == 1
+                    && exclusions::path(&file)? == path,
+                "retry_required: final path identity changed"
+            );
+            policy.skipped = policy.skipped.saturating_add(1);
+            return Ok(Resolved::Excluded);
+        }
         let mut standard = FILE_STANDARD_INFO::default();
         let standard_ok = unsafe {
             GetFileInformationByHandleEx(
@@ -319,6 +434,9 @@ impl WindowsVolumeSource {
             after.nNumberOfLinks == before.nNumberOfLinks,
             "retry_required: link count changed during reconciliation"
         );
+        if names.is_empty() && self.policy.is_some() {
+            return Ok(Resolved::Excluded);
+        }
         if !directory && before.dwFileAttributes & FILE_ATTRIBUTE_SYSTEM == 0 {
             self.known_files.insert(id.to_owned());
         }
@@ -470,8 +588,10 @@ impl WindowsVolumeSource {
         }
         let _guard = Find(handle);
         let mut names = Vec::new();
+        let mut observed = 0;
         loop {
-            ensure!(names.len() < 1024, "link enumeration exceeded bound");
+            ensure!(observed < 1024, "link enumeration exceeded bound");
+            observed += 1;
             let end = buffer
                 .iter()
                 .position(|v| *v == 0)
@@ -488,10 +608,18 @@ impl WindowsVolumeSource {
                     && parent_info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0,
                 "link parent outside volume"
             );
-            names.push(Name {
-                parent: key(file_id(&parent_info)),
-                name: name.to_owned(),
-            });
+            if !self.policy.as_ref().is_some_and(|policy| {
+                policy.excludes(&format!(
+                    "{}{}",
+                    self.guid,
+                    relative.trim_start_matches('\\')
+                ))
+            }) {
+                names.push(Name {
+                    parent: key(file_id(&parent_info)),
+                    name: name.to_owned(),
+                });
+            }
             buffer.fill(0);
             count = buffer.len() as u32;
             if unsafe { FindNextFileNameW(handle, &mut count, buffer.as_mut_ptr()) } == 0 {
@@ -503,7 +631,7 @@ impl WindowsVolumeSource {
             }
         }
         ensure!(
-            names.len() == expected as usize,
+            observed == expected as usize,
             "retry_required: incomplete link set"
         );
         Ok(names)
@@ -524,6 +652,9 @@ fn name_race(error: anyhow::Error, stage: &'static str) -> anyhow::Error {
     }
 }
 impl VolumeSource for WindowsVolumeSource {
+    fn policy(&self) -> Option<CollectionPolicy> {
+        self.policy.as_ref().map(|p| p.descriptor())
+    }
     fn identity(&self) -> VolumeIdentity {
         VolumeIdentity {
             backend: "windows-ntfs-v1".into(),
@@ -534,6 +665,9 @@ impl VolumeSource for WindowsVolumeSource {
         self.root.clone()
     }
     fn checkpoint(&mut self) -> Result<Checkpoint> {
+        if let Some(policy) = &mut self.policy {
+            policy.checkpoint();
+        }
         let j = io::journal(&self.file)?;
         Ok(Checkpoint(serde_json::to_string(&Position {
             identity: self.identity(),
@@ -588,6 +722,9 @@ impl VolumeSource for WindowsVolumeSource {
         })
     }
     fn changes(&mut self, p: &Checkpoint) -> Result<Changes> {
+        if self.policy.as_ref().is_some_and(|policy| policy.changed()) {
+            return Err(PolicyBoundaryChanged.into());
+        }
         self.validate(p)?;
         let mut position = self.position(p)?;
         let target = io::journal(&self.file)?.NextUsn;
@@ -599,6 +736,9 @@ impl VolumeSource for WindowsVolumeSource {
             });
         }
         let (next, records) = usn::parse(&io::read(&self.file, position.journal, position.next)?)?;
+        if self.boundary_changed(&records) {
+            return Err(PolicyBoundaryChanged.into());
+        }
         ensure!(
             next <= i64::MAX as u64 && next as i64 > position.next,
             "journal did not advance"
@@ -755,6 +895,7 @@ mod tests {
             known_files: HashSet::new(),
             deletion_hints: HashSet::new(),
             excluded: HashSet::new(),
+            policy: None,
             metrics: Metrics::default(),
         };
         let id = source.id_for_path(&one).unwrap();

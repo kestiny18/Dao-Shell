@@ -257,7 +257,13 @@ const indexLabels = {accepted:t('settings.rebuild_accepted_check_volume_status_f
 const indexReasons = {offline:t('settings.volume_offline'),stopping_offline:t('settings.volume_offline_stopping_the_old_index'),discovery_failed:t('settings.volume_discovery_failed_keeping_the_previous_catalog'),access_denied:t('settings.some_system_metadata_is_inaccessible'),sharing_violation:t('settings.some_files_are_temporarily_in_use'),delete_pending:t('settings.some_files_are_being_deleted'),file_metadata_not_supported:t('settings.some_metadata_is_unsupported'),unresolved_parent_chain:t('settings.some_parent_relationships_are_unresolved'),metadata_unavailable:t('settings.some_metadata_is_unavailable'),coverage_incomplete:t('settings.index_coverage_is_incomplete'),query_unavailable:t('settings.query_unavailable'),query_timeout:t('settings.query_reached_its_time_budget'),journal_unavailable:t('settings.volume_change_journal_unavailable'),worker_unavailable:t('settings.volume_index_unavailable'),worker_panicked:t('settings.volume_index_error'),worker_stopped:t('settings.volume_index_stopped'),volume_worker_limit:t('settings.volume_count_limit_exceeded'),unsupported_filesystem:t('settings.file_system_unsupported'),not_fixed_volume:t('settings.not_a_fixed_local_volume'),volume_unavailable:t('settings.volume_unavailable'),mount_or_candidate_changed:t('settings.volume_mapping_or_file_identity_changed'),candidate_changed:t('settings.candidate_changed_during_validation'),no_supported_volume:t('settings.no_supported_volume')};
 function indexReason(value) { return builtinText(indexReasons[value]) || t('settings.some_records_are_unavailable'); }
 indexLabels.budget_retrying=t('settings.index_budget_retrying');
+Object.assign(indexLabels,{policy_rebuilding:t('settings.policy_rebuilding')});
+indexLabels.policy_configuration_failed=t('settings.policy_configuration_failed');
 Object.assign(indexReasons, {
+  policy_rebuild_required:t('settings.policy_rebuild_required'),
+  policy_boundary_changed:t('settings.policy_boundary_changed'),
+  policy_configuration_failed:t('settings.policy_configuration_failed'),
+  policy_location_unavailable:t('settings.policy_location_unavailable'),
   budget_increasing_retrying:t('settings.index_budget_increasing'),
   budget_limit_exhausted:t('settings.index_budget_limit_exhausted'),
   budget_metadata_exhausted:t('settings.index_budget_metadata'),
@@ -279,26 +285,46 @@ function indexVolumeText(volume) {
   const reasons=[...new Set([...(status.reasons || status.coverage_reasons || []),status.error,budgetDetail,volume.worker_error,volume.reason].filter(Boolean))];
   const updated=status.updated_unix_ms ? localDate(Number(status.updated_unix_ms)) : t('settings.not_published_yet');
   const restart=!volume.worker_started && ['worker_unavailable','worker_panicked','worker_stopped','identity_changed','rebuild_required'].includes(volume.worker_error);
-  return `${location} · ${builtinText(indexLabels[phase]) || t('settings.unknown_status')}${status.generation == null ? '' : t('settings.generation_value',{v0:(status.generation)})} · ${updated}${reasons.length ? ` · ${reasons.map(indexReason).join('；')}` : ''}${restart ? t('settings.stop_and_restart_the_service_under_service_management_then_check') : ''}`;
+  const scope=status.policy?.id ? t('settings.policy_published',{v0:indexPolicyName(status.policy.id)}) : status.requested_policy ? t(status.generation == null ? 'settings.policy_no_publication' : 'settings.policy_legacy') : '';
+  const pending=status.requested_policy && status.requested_policy!==status.policy?.id ? t('settings.policy_pending',{v0:indexPolicyName(status.requested_policy)}) : '';
+  const excluded=status.policy ? t('settings.policy_counts',{v0:status.policy.excluded_roots || 0,v1:status.policy.skipped_resolutions || 0}) : '';
+  return `${location} · ${builtinText(indexLabels[phase]) || t('settings.unknown_status')}${status.generation == null ? '' : t('settings.generation_value',{v0:(status.generation)})} · ${updated}${reasons.length ? ` · ${reasons.map(indexReason).join('；')}` : ''}${scope ? ' · '+scope : ''}${pending ? ' · '+pending : ''}${excluded ? ' · '+excluded : ''}${restart ? t('settings.stop_and_restart_the_service_under_service_management_then_check') : ''}`;
 }
-async function indexServiceAction(action='status',volumeKey=null) {
+function indexPolicyName(id) { return id==='windows_default_v1' ? t('settings.policy_default') : id==='windows_all_v1' ? t('settings.policy_all') : t('settings.policy_legacy'); }
+function indexVolumeControls(row,volume,current) {
+ const status=volume.index_status || {};
+ const usable=current.state==='running' && volume.supported && volume.worker_started && !volume.worker_error && !['maintenance_stopped','storage_identity_changed'].includes(status.error) && volume.pipe?.startsWith('volume-');
+ if(!usable) return;
+ const key=volume.pipe.slice(7);
+ const controls=document.createElement('div');controls.className='index-volume-controls';row.append(controls);
+ const rebuild=document.createElement('button');rebuild.type='button';rebuild.textContent=t('settings.rebuild_index');rebuild.addEventListener('click',()=>indexServiceAction('rebuild',key));controls.append(rebuild);
+ if(!status.requested_policy) return;
+ const label=document.createElement('label');label.textContent=t('settings.policy_collect_scope');
+ const select=document.createElement('select');select.setAttribute('aria-label',`${t('settings.policy_collect_scope')} · ${volume.mounts?.[0] || volume.volume || t('settings.unmounted_volume')}`);
+ for(const [value,text] of [['false',t('settings.policy_default')],['true',t('settings.policy_all')]]) {const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option);}
+ select.value=String(status.requested_policy==='windows_all_v1');label.append(select);controls.append(label);
+ const apply=document.createElement('button');apply.type='button';apply.textContent=t('settings.policy_apply');apply.addEventListener('click',()=>indexServiceAction('set-policy',key,select.value==='true'));controls.append(apply);
+ const note=document.createElement('p');note.textContent=t('settings.policy_note');row.append(note);
+}
+async function indexServiceAction(action='status',volumeKey=null,includeSystemFiles=null) {
   if (!api || indexServiceLoading) return;
   let confirmed=false;const deleteIndex=action==='uninstall' && $('index-delete-data').checked;
   if (!['status','diagnostic'].includes(action)) {
-    confirmed=await ask(action==='rebuild' ? t('settings.record_all_file_names_on_this_volume_again_the_old_generation_re') : t('settings.confirm_value_value_only_this_explicit_action_requests_administr',{v0:(action==='install' ? t('settings.install_the_whole_volume_name_index_component_administrator_perm') : action==='upgrade' ? t('settings.update_the_whole_volume_name_index_component_administrator_permi') : t('settings.perform_this_service_management_action')),v1:(deleteIndex ? t('settings.index_records_will_also_be_deleted_source_files_are_unaffected') : t('settings.index_records_are_preserved_by_default'))}));
+    confirmed=await ask(action==='set-policy' ? t('settings.policy_confirm',{v0:indexPolicyName(includeSystemFiles ? 'windows_all_v1' : 'windows_default_v1')}) : action==='rebuild' ? t('settings.record_all_file_names_on_this_volume_again_the_old_generation_re') : t('settings.confirm_value_value_only_this_explicit_action_requests_administr',{v0:(action==='install' ? t('settings.install_the_whole_volume_name_index_component_administrator_perm') : action==='upgrade' ? t('settings.update_the_whole_volume_name_index_component_administrator_permi') : t('settings.perform_this_service_management_action')),v1:(deleteIndex ? t('settings.index_records_will_also_be_deleted_source_files_are_unaffected') : t('settings.index_records_are_preserved_by_default'))}));
     if(!confirmed) return;
   }
   indexServiceLoading=true;
   const buttons=[$('index-refresh'),$('index-diagnostic'),...document.querySelectorAll('[data-index-action]')];buttons.forEach(button=>button.disabled=true);
   try {
-    const value=await api.invoke('index_service_command',{action,confirmed,deleteIndex,volumeKey});
+    if(action==='set-policy') {invalidateContexts();renderCurrent();}
+    const value=await api.invoke('index_service_command',{action,confirmed,deleteIndex,volumeKey,...(action==='set-policy' ? {includeSystemFiles} : {})});
     if(action==='diagnostic') { $('index-diagnostic-text').value=JSON.stringify(value,null,2);$('index-report').hidden=false;$('index-report').open=true; }
     if(!['status','diagnostic'].includes(action)) $('index-service-operation').textContent=builtinText(indexLabels[value.state]) || t('settings.operation_returned_refresh_status');
     const current=action==='status' ? value : await api.invoke('index_service_command',{action:'status',confirmed:false,deleteIndex:false});
     const guidance={stopped:t('settings.start_the_index_component_under_service_management'),version_mismatch:t('settings.update_the_service_under_service_management_then_refresh_status'),unavailable:t('settings.refresh_status_if_still_unavailable_check_or_repair_the_service_')};
     $('index-service-status').textContent=`${current.enabled ? t('settings.full_access_whole_volume_name_search_by_default') : t('settings.restricted_access_authorized_folders_only')} · ${builtinText(indexLabels[current.state]) || t('settings.unknown_status')}${guidance[current.state] ? ` · ${guidance[current.state]}` : ''}${current.payload_ready ? '' : t('settings.installation_payload_missing_this_build_cannot_install_the_servi')}`;
     $('index-service-volumes').replaceChildren();
-    for(const volume of current.volumes || []) {const row=document.createElement('li');row.textContent=indexVolumeText(volume);const writerStopped=['maintenance_stopped','storage_identity_changed'].includes(volume.index_status?.error);if(current.state==='running' && volume.supported && volume.worker_started && !volume.worker_error && !writerStopped && volume.pipe?.startsWith('volume-')) {const button=document.createElement('button');button.textContent=t('settings.rebuild_index');button.addEventListener('click',()=>indexServiceAction('rebuild',volume.pipe.slice(7)));row.append(button);}$('index-service-volumes').append(row);}
+    for(const volume of current.volumes || []) {const row=document.createElement('li');row.className='index-volume';const summary=document.createElement('span');summary.className='index-volume-summary';summary.textContent=indexVolumeText(volume);row.append(summary);indexVolumeControls(row,volume,current);$('index-service-volumes').append(row);}
     buttons.forEach(button=>button.disabled=Boolean(current.busy) || (!current.payload_ready && button!==$('index-refresh') && button!==$('index-diagnostic')));
   } catch(error) {$('index-service-status').textContent=errorText(error);buttons.forEach(button=>button.disabled=false);}
   finally {indexServiceLoading=false;}

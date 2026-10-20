@@ -89,6 +89,10 @@ impl IndexStore {
         };
         if let Some((s, root)) = &previous {
             ensure!(
+                s.policy.as_ref().map(|p| &p.id) == source.policy().as_ref().map(|p| &p.id),
+                "policy_rebuild_required: published scope differs from requested policy"
+            );
+            ensure!(
                 s.volume == source.identity() && *root == source.root(),
                 "rebuild_required: volume changed"
             );
@@ -205,7 +209,13 @@ impl IndexStore {
         if unresolved > unavailable {
             coverage_reasons.push("unresolved_parent_chain".into());
         }
+        let policy = source.policy();
+        let policy_complete = policy.as_ref().is_none_or(|p| p.unavailable_roots == 0);
+        if !policy_complete {
+            coverage_reasons.push("policy_location_unavailable".into());
+        }
         let status = Status {
+            policy,
             published_unix_ms: Some(
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
@@ -213,7 +223,7 @@ impl IndexStore {
             ),
             volume: source.identity(),
             generation,
-            complete: unresolved == 0,
+            complete: unresolved == 0 && policy_complete,
             nodes,
             names,
             unresolved,
@@ -346,7 +356,7 @@ fn reconcile(
             })
             .optional()?;
         let unchanged = match &result {
-            Resolved::Deleted => existing.is_none() && denied.is_none(),
+            Resolved::Deleted | Resolved::Excluded => existing.is_none() && denied.is_none(),
             Resolved::Unavailable(reason) => {
                 existing.is_none() && denied.as_deref() == Some(*reason)
             }
@@ -376,7 +386,7 @@ fn reconcile(
         conn.execute("DELETE FROM nodes WHERE id=?1", [&id])?;
         conn.execute("DELETE FROM unavailable WHERE id=?1", [&id])?;
         match result {
-            Resolved::Deleted => (),
+            Resolved::Deleted | Resolved::Excluded => (),
             Resolved::Unavailable(reason) => {
                 conn.execute("INSERT INTO unavailable VALUES(?1,?2)", params![id, reason])?;
             }

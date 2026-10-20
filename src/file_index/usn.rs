@@ -5,6 +5,7 @@ pub(super) struct Record {
     pub(super) parent: u64,
     pub(super) usn: i64,
     pub(super) reason: u32,
+    pub(super) attributes: u32,
     pub(super) name: String,
 }
 
@@ -63,6 +64,7 @@ pub(super) fn parse(bytes: &[u8]) -> Result<(u64, Vec<Record>)> {
             parent: u64le(b, 16),
             usn: u64le(b, 24) as i64,
             reason: u32le(b, 40),
+            attributes: u32le(b, 52),
             name,
         });
         pos += size;

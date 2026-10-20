@@ -205,7 +205,9 @@ impl Layout {
                         "index.db-wal",
                         "index.db-shm",
                         "index.db-journal",
-                        "worker-diagnostics.jsonl"
+                        "worker-diagnostics.jsonl",
+                        "policy.json",
+                        "policy.pending"
                     ]
                     .iter()
                     .any(|name| file.file_name() == *name),

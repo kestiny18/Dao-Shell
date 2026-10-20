@@ -18,6 +18,31 @@ pub struct Integration {
     busy: AtomicBool,
 }
 impl Integration {
+    pub fn set_policy(&self, key: &str, include: bool, confirmed: bool) -> Result<Value> {
+        ensure!(confirmed, "请在本地设置中确认收集范围变更及重新记录");
+        #[cfg(windows)]
+        {
+            ensure!(
+                dao_shell::file_index::worker::service::valid_volume_key(key),
+                "无效卷标识"
+            );
+            let _gate = self
+                .management
+                .try_lock()
+                .map_err(|_| anyhow::anyhow!("已有服务操作进行中"))?;
+            let (_, sha) = bundled::PAYLOAD.ok_or_else(|| anyhow::anyhow!("安装产物尚未准备"))?;
+            dao_shell::search_index::WindowsServiceIndexClient::new(sha.into()).set_policy(
+                key,
+                include,
+                &Cancellation::default(),
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (key, include);
+            anyhow::bail!("当前仅支持 Windows")
+        }
+    }
     pub fn rebuild(&self, key: &str, confirmed: bool) -> Result<Value> {
         ensure!(confirmed, "请在本地设置中确认重建此卷的索引");
         #[cfg(windows)]
@@ -151,6 +176,12 @@ fn safe_code(value: &Value, allowed: &[&str]) -> Value {
         .filter(|code| allowed.contains(code))
         .map_or(Value::Null, |code| json!(code))
 }
+fn safe_policy(value: &Value) -> Value {
+    if !value.is_object() {
+        return Value::Null;
+    }
+    json!({"id":safe_code(&value["id"],&["windows_default_v1","windows_all_v1"]),"categories":value["categories"].as_array().into_iter().flatten().filter_map(|code| { let safe=safe_code(code,&["volume_internal","recycle_bin","windows_components","installer_cache","driver_cache","system_temp","update_cache"]); (!safe.is_null()).then_some(safe) }).take(8).collect::<Vec<_>>(),"excluded_roots":value["excluded_roots"].as_u64().filter(|n|*n<=16),"unavailable_roots":value["unavailable_roots"].as_u64().filter(|n|*n<=16),"skipped_resolutions":value["skipped_resolutions"].as_u64()})
+}
 fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
     let digest =
         |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
@@ -170,6 +201,9 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         "coverage_incomplete",
         "retrying",
         "budget_retrying",
+        "policy_rebuilding",
+        "rebuild_queued",
+        "rebuilding",
         "rebuild_required",
         "error",
         "initializing",
@@ -181,6 +215,10 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         "cancelled",
         "stale_cursor",
         "budget_exhausted",
+        "policy_rebuild_required",
+        "policy_boundary_changed",
+        "policy_configuration_failed",
+        "policy_location_unavailable",
         "budget_increasing_retrying",
         "budget_limit_exhausted",
         "budget_metadata_exhausted",
@@ -228,7 +266,7 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         });
         let state=&volume["index_status"];
         let reasons:Vec<_>=state["coverage_reasons"].as_array().into_iter().flatten().map(|value|safe_code(value,&codes)).filter(|value|!value.is_null()).take(32).collect();
-        json!({"volume":drive.map(str::to_owned).unwrap_or_else(||format!("volume-{}",index+1)),"phase":safe_code(&state["phase"],&phases),"generation":state["generation"].as_u64(),"updated_unix_ms":state["updated_unix_ms"].as_u64(),"complete":state["complete"].as_bool(),"error":safe_code(&state["error"],&codes),"worker_error":safe_code(&volume["worker_error"],&codes),"reason":safe_code(&volume["reason"],&codes),"coverage_reasons":reasons,"diagnostic":{"available":state["diagnostic"].is_object(),"stage":safe_code(&state["diagnostic"]["stage"],&stages),"code":safe_code(&state["diagnostic"]["code"],&codes),"native_code":state["diagnostic"]["native_code"].as_i64().filter(|code|(0..=65535).contains(code))}})
+        json!({"policy":safe_policy(&state["policy"]),"requested_policy":safe_code(&state["requested_policy"],&["windows_default_v1","windows_all_v1"]),"volume":drive.map(str::to_owned).unwrap_or_else(||format!("volume-{}",index+1)),"phase":safe_code(&state["phase"],&phases),"generation":state["generation"].as_u64(),"updated_unix_ms":state["updated_unix_ms"].as_u64(),"complete":state["complete"].as_bool(),"error":safe_code(&state["error"],&codes),"worker_error":safe_code(&volume["worker_error"],&codes),"reason":safe_code(&volume["reason"],&codes),"coverage_reasons":reasons,"diagnostic":{"available":state["diagnostic"].is_object(),"stage":safe_code(&state["diagnostic"]["stage"],&stages),"code":safe_code(&state["diagnostic"]["code"],&codes),"native_code":state["diagnostic"]["native_code"].as_i64().filter(|code|(0..=65535).contains(code))}})
     }).collect();
     json!({"report_version":1,"product_version":env!("CARGO_PKG_VERSION"),"client_protocol":1,"expected_service_build":expected.filter(|value|digest(value)),"actual_service_build":status["build"].as_str().filter(|value|digest(value)),"state":safe_code(&status["state"],&states),"full_access":status["enabled"].as_bool().unwrap_or(false),"volumes":volumes,"note":"Only safe status fields are exported. Missing diagnostics require a newer matching service; no failure cause is inferred."})
 }
@@ -236,6 +274,24 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn policy_report_is_explicit_bounded_and_omits_private_rule_paths() {
+        let value = json!({"id":"windows_default_v1","categories":["system_temp","SECRET_PATH"],"excluded_roots":4,"unavailable_roots":1,"skipped_resolutions":120,"path":"SECRET_PRIVATE"});
+        let safe = safe_policy(&value);
+        assert_eq!(safe["id"], "windows_default_v1");
+        assert_eq!(safe["categories"], json!(["system_temp"]));
+        assert_eq!(safe["skipped_resolutions"], 120);
+        assert!(!safe.to_string().contains("SECRET"));
+        assert!(safe_policy(&Value::Null).is_null());
+        assert!(
+            safe_policy(&json!({"id":"SECRET","excluded_roots":99999}))["excluded_roots"].is_null()
+        );
+        let fixture = tempfile::tempdir().unwrap();
+        let integration = Integration::new(fixture.path().join("config.json"));
+        assert!(integration.set_policy("invalid", true, false).is_err());
+        assert!(integration.set_policy("../arbitrary", true, true).is_err());
+        assert!(!fixture.path().join("config.json").exists());
+    }
     #[test]
     fn diagnostic_export_preserves_bounded_budget_recovery_details() {
         for (stage, code) in [

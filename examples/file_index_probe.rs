@@ -93,6 +93,7 @@ fn run(args: Args) -> Result<serde_json::Value> {
                         json!({"id":id,"kind":"present","directory":n.directory,"names":n.names.len(),"parent_ids":n.names.iter().map(|n|n.parent.clone()).collect::<Vec<_>>()})
                     }
                     Ok(Resolved::Deleted) => json!({"id":id,"kind":"deleted"}),
+                    Ok(Resolved::Excluded) => json!({"id":id,"kind":"excluded"}),
                     Ok(Resolved::Unavailable(reason)) => {
                         json!({"id":id,"kind":"unavailable","reason":reason})
                     }

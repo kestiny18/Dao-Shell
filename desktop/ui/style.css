@@ -229,3 +229,10 @@ html[lang="en"] .metrics { grid-template-columns: repeat(auto-fit, minmax(180px,
 html[lang="en"] .settings-tabs { flex-wrap: wrap; }
 html[lang="en"] .home-actions, html[lang="en"] .settings-save { flex-wrap: wrap; }
 html[lang="en"] .brand-name small { white-space: normal; }
+.directory-list li.index-volume { display: block; min-width: 0; }
+.index-volume-summary { display: block; overflow-wrap: anywhere; }
+.index-volume-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 8px; min-width: 0; }
+.index-volume-controls label { display: flex; flex: 1 1 220px; flex-direction: column; gap: 4px; min-width: 0; }
+.index-volume-controls select { width: 100%; max-width: 100%; min-width: 0; }
+.index-volume-controls button { max-width: 100%; white-space: normal; }
+.index-volume p { overflow-wrap: anywhere; margin: 8px 0 0; }

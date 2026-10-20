@@ -1,5 +1,6 @@
 //! Windows index worker and fixed SCM service integration.
 mod fixture;
+mod policy;
 pub mod protocol;
 mod security;
 pub mod service;
@@ -13,6 +14,7 @@ use super::{
     Budget, BudgetExceeded, Cancellation, IndexStore, SearchCursor, VolumeSource,
     windows::WindowsVolumeSource,
 };
+use anyhow::Context;
 use anyhow::{Result, ensure};
 use protocol::*;
 use security::Principal;
@@ -52,17 +54,25 @@ fn validate_source_location(identity: &super::VolumeIdentity, config: &Config) -
     Ok(())
 }
 trait WorkerSource: VolumeSource + Send {
+    fn configure_policy(&mut self, _: bool) -> Result<()> {
+        anyhow::bail!("collection policy unavailable")
+    }
     fn prepare(&mut self, paths: &[PathBuf]) -> Result<()>;
     fn metrics(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
 }
 impl WorkerSource for WindowsVolumeSource {
+    fn configure_policy(&mut self, include: bool) -> Result<()> {
+        WindowsVolumeSource::configure_policy(self, include)
+    }
     fn metrics(&self) -> serde_json::Value {
         serde_json::to_value(&self.metrics).unwrap_or_default()
     }
     fn prepare(&mut self, paths: &[PathBuf]) -> Result<()> {
-        self.exclude_paths(paths)
+        self.exclude_paths(paths)?;
+        self.refresh_policy();
+        Ok(())
     }
 }
 impl WorkerSource for fixture::FixtureSource {
@@ -81,6 +91,7 @@ struct Shared {
 }
 #[derive(Default)]
 struct Rebuild {
+    policy: Option<bool>,
     disabled: bool,
     pending: bool,
     running: bool,
@@ -113,8 +124,41 @@ impl Rebuild {
         true
     }
 }
+fn queue_policy(
+    shared: &Shared,
+    include: bool,
+    persist: impl FnOnce() -> Result<()>,
+) -> Result<&'static str> {
+    let mut state = shared.state.lock().unwrap();
+    ensure!(
+        state.requested_policy.is_some(),
+        "collection policy unavailable"
+    );
+    let mut control = shared.rebuild.lock().unwrap();
+    let before = (control.pending, control.running, control.last);
+    let outcome = if shared.stop.cancelled() {
+        "unavailable"
+    } else {
+        control.request(Instant::now())
+    };
+    if outcome == "accepted" {
+        if let Err(error) = persist() {
+            control.pending = before.0;
+            control.running = before.1;
+            control.last = before.2;
+            return Err(error);
+        }
+        control.policy = Some(include);
+        shared.cursors.lock().unwrap().clear();
+        state.requested_policy = Some(super::windows::exclusions::id(include).into());
+        state.phase = "rebuild_queued".into();
+    }
+    Ok(outcome)
+}
 fn initial() -> PublicStatus {
     PublicStatus {
+        policy: None,
+        requested_policy: None,
         coverage_reasons: Vec::new(),
         diagnostic: None,
         phase: "building".into(),
@@ -137,7 +181,14 @@ fn classify(error: &anyhow::Error) -> String {
         return "budget_exhausted".into();
     }
     let text = error.to_string();
-    if text.contains("rebuild_required") {
+    if text.contains("policy_rebuild_required") {
+        "policy_rebuild_required"
+    } else if error
+        .downcast_ref::<super::PolicyBoundaryChanged>()
+        .is_some()
+    {
+        "policy_boundary_changed"
+    } else if text.contains("rebuild_required") {
         "rebuild_required"
     } else if text.contains("index_not_ready") {
         "index_not_ready"
@@ -198,7 +249,8 @@ fn public_reasons(reasons: &[String]) -> Vec<String> {
                 | "invalid_id_still_in_mft"
                 | "deletion_confirmation_unavailable"
                 | "metadata_access_or_sharing_denied"
-                | "unresolved_parent_chain" => reason.as_str(),
+                | "unresolved_parent_chain"
+                | "policy_location_unavailable" => reason.as_str(),
                 _ => "metadata_unavailable",
             }
             .to_owned(),
@@ -289,6 +341,9 @@ fn run_internal(
         Mode::Volume(volume) => {
             let mut source = WindowsVolumeSource::open(volume)?;
             if service_storage {
+                source.configure_policy(policy::load(&config.database)?)?;
+            }
+            if service_storage {
                 validate_source_location(&source.identity(), &config)?;
                 source.checkpoint()?;
             }
@@ -326,12 +381,14 @@ fn run_internal(
         transport::listeners(&config.pipe, fixture)?
     };
     let mut startup = initial();
+    startup.requested_policy = source.policy().map(|p| p.id);
     if let Ok(published) = writer.status() {
         startup.phase = "catching_up".into();
         startup.generation = Some(published.generation);
         startup.complete = published.complete;
         startup.updated_unix_ms = published.published_unix_ms;
         startup.coverage_reasons = public_reasons(&published.coverage_reasons);
+        startup.policy = published.policy;
     }
     let shared = Arc::new(Shared {
         stop: stop.clone(),
@@ -434,20 +491,39 @@ fn maintain_with_budget(
     service_storage: bool,
 ) {
     // Each attempt remains atomic. Budget growth permits four tiers (1x/2x/4x/8x)
-    // and the separate identity-race policy permits six retries. Thus an episode
-    // consumes at most 63x the initial work budget; successful tiers are retained.
+    // and identity races permit six retries (at most 63x initial work). Two
+    // boundary recovery retries add at most 16x. Successful tiers are retained.
     let mut budget = BudgetRecovery::new(initial_budget);
-    let mut rebuild = store.status().is_err();
+    let mut rebuild = store.status().map_or(true, |status| {
+        status.policy.as_ref().map(|p| &p.id) != source.policy().as_ref().map(|p| &p.id)
+            && shared.db.with_file_name("policy.json").is_file()
+    });
     let mut delay = 100;
     let mut blocked = false;
     let mut retry_attempts = 0;
     let mut diagnostics_left = 128;
+    let mut policy_retries = 0;
     while !stop.cancelled() {
-        if shared.rebuild.lock().unwrap().take() {
+        let queued = {
+            let mut control = shared.rebuild.lock().unwrap();
+            control.take().then(|| control.policy.take())
+        };
+        if let Some(include) = queued {
+            if let Some(include) = include
+                && source.configure_policy(include).is_err()
+            {
+                let mut state = shared.state.lock().unwrap();
+                state.phase = "error".into();
+                state.error = Some("policy_configuration_failed".into());
+                shared.rebuild.lock().unwrap().running = false;
+                blocked = true;
+                continue;
+            }
             rebuild = true;
             blocked = false;
             retry_attempts = 0;
             budget.reset();
+            policy_retries = 0;
             shared.state.lock().unwrap().phase = "rebuilding".into();
         }
         if !blocked {
@@ -456,6 +532,8 @@ fn maintain_with_budget(
                 PathBuf::from(format!("{}-wal", shared.db.display())),
                 PathBuf::from(format!("{}-shm", shared.db.display())),
                 shared.db.with_file_name("worker-diagnostics.jsonl"),
+                shared.db.with_file_name("policy.json"),
+                shared.db.with_file_name("policy.pending"),
             ];
             if service_storage {
                 match service::storage_paths() {
@@ -496,6 +574,7 @@ fn maintain_with_budget(
                 Ok(status) => {
                     shared.rebuild.lock().unwrap().running = false;
                     retry_attempts = 0;
+                    policy_retries = 0;
                     budget.attempts = 0;
                     rebuild = false;
                     let changed = old != Some(status.generation);
@@ -512,6 +591,7 @@ fn maintain_with_budget(
                     state.generation = Some(status.generation);
                     state.updated_unix_ms = status.published_unix_ms;
                     state.coverage_reasons = public_reasons(&status.coverage_reasons);
+                    state.policy = status.policy;
                     if changed {
                         delay = 100;
                     } else {
@@ -525,6 +605,16 @@ fn maintain_with_budget(
                         state.phase = "error".into();
                         state.error = Some("cancelled".into());
                         break;
+                    } else if error
+                        .downcast_ref::<super::PolicyBoundaryChanged>()
+                        .is_some()
+                        && policy_retries < 2
+                    {
+                        policy_retries += 1;
+                        rebuild = true;
+                        delay = 250;
+                        state.phase = "policy_rebuilding".into();
+                        state.error = Some("policy_boundary_changed".into());
                     } else if budget.increase(&error) {
                         delay = 1000;
                         state.phase = "budget_retrying".into();
@@ -541,13 +631,20 @@ fn maintain_with_budget(
                             "error"
                         }
                         .into();
-                        state.error = Some(if error.downcast_ref::<BudgetExceeded>().is_some() {
-                            "budget_limit_exhausted".into()
-                        } else if super::metadata_retryable(&error) {
-                            "metadata_changed_retry_exhausted".into()
-                        } else {
-                            code
-                        });
+                        state.error = Some(
+                            if error
+                                .downcast_ref::<super::PolicyBoundaryChanged>()
+                                .is_some()
+                            {
+                                "policy_rebuild_required".into()
+                            } else if error.downcast_ref::<BudgetExceeded>().is_some() {
+                                "budget_limit_exhausted".into()
+                            } else if super::metadata_retryable(&error) {
+                                "metadata_changed_retry_exhausted".into()
+                            } else {
+                                code
+                            },
+                        );
                         blocked = true;
                         shared.rebuild.lock().unwrap().running = false;
                     }
@@ -612,6 +709,21 @@ fn serve_connection(
                 reply.status.phase = "rebuild_queued".into();
             }
         }
+        Operation::SetPolicy {
+            include_system_files,
+        } => {
+            let outcome = queue_policy(shared, *include_system_files, || {
+                policy::save(&shared.db, *include_system_files)
+            });
+            reply.status = shared.state.lock().unwrap().clone();
+            match outcome {
+                Ok(outcome) => reply.control = Some(outcome.into()),
+                Err(_) => {
+                    reply.control = Some("failed".into());
+                    reply.error = Some("policy_configuration_failed".into());
+                }
+            }
+        }
         Operation::Search {
             query,
             page_size,
@@ -641,12 +753,8 @@ fn serve_connection(
             shared.active.lock().unwrap().remove(&request.id);
             match result {
                 Ok((hits, cursor, snapshot)) => {
-                    reply.hits = hits;
-                    reply.cursor = cursor;
-                    reply.status.generation = Some(snapshot.generation);
-                    reply.status.complete = snapshot.complete;
-                    reply.status.updated_unix_ms = snapshot.published_unix_ms;
-                    reply.status.coverage_reasons = public_reasons(&snapshot.coverage_reasons);
+                    let current = shared.state.lock().unwrap().clone();
+                    apply_search_snapshot(&mut reply, &current, snapshot, hits, cursor);
                 }
                 Err(error) => reply.error = Some(classify(&error)),
             }
@@ -655,6 +763,28 @@ fn serve_connection(
     let output = serde_json::to_vec(&reply)?;
     transport::send(pipe, &output, &envelope)?;
     transport::wait_ack(pipe, &envelope)
+}
+fn apply_search_snapshot(
+    reply: &mut Response,
+    current: &PublicStatus,
+    snapshot: super::Status,
+    hits: Vec<Hit>,
+    cursor: Option<String>,
+) {
+    if current.requested_policy.as_deref() != snapshot.policy.as_ref().map(|p| p.id.as_str()) {
+        reply.hits.clear();
+        reply.cursor = None;
+        reply.status = current.clone();
+        reply.error = Some("policy_rebuild_required".into());
+        return;
+    }
+    reply.hits = hits;
+    reply.cursor = cursor;
+    reply.status.generation = Some(snapshot.generation);
+    reply.status.complete = snapshot.complete;
+    reply.status.updated_unix_ms = snapshot.published_unix_ms;
+    reply.status.coverage_reasons = public_reasons(&snapshot.coverage_reasons);
+    reply.status.policy = snapshot.policy;
 }
 fn search(
     pipe: windows_sys::Win32::Foundation::HANDLE,
@@ -665,6 +795,13 @@ fn search(
     cursor: Option<&str>,
     cancel: &Cancellation,
 ) -> Result<(Vec<Hit>, Option<String>, super::Status)> {
+    {
+        let state = shared.state.lock().unwrap();
+        ensure!(
+            state.requested_policy.as_deref() == state.policy.as_ref().map(|p| p.id.as_str()),
+            "policy_rebuild_required"
+        );
+    }
     ensure!(
         shared.state.lock().unwrap().generation.is_some(),
         "index_not_ready"

@@ -21,9 +21,23 @@ async fn index_service_command(
     confirmed: bool,
     delete_index: bool,
     volume_key: Option<String>,
+    include_system_files: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let bridge = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        if action == "set-policy" {
+            if delete_index {
+                return Err("收集范围不能删除索引目录".into());
+            }
+            return bridge.set_index_policy(
+                volume_key.as_deref().unwrap_or(""),
+                include_system_files.ok_or("缺少收集范围设置")?,
+                confirmed,
+            );
+        }
+        if include_system_files.is_some() {
+            return Err("此操作不接受收集范围参数".into());
+        }
         if action == "rebuild" {
             if delete_index {
                 return Err("重建不能删除索引目录".into());

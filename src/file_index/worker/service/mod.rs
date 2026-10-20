@@ -99,6 +99,8 @@ pub(super) fn storage_paths() -> Result<Vec<std::path::PathBuf>> {
             "index.db-shm",
             "index.db-journal",
             "worker-diagnostics.jsonl",
+            "policy.json",
+            "policy.pending",
         ] {
             paths.push(directory.join(name));
         }

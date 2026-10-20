@@ -23,6 +23,10 @@ impl Candidate {
 }
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct VolumeReceipt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<crate::file_index::CollectionPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_policy: Option<String>,
     pub volume: String,
     pub generation: Option<u64>,
     pub updated_unix_ms: Option<u128>,

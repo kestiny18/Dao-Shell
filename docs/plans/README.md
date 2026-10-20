@@ -6,9 +6,10 @@ Plans are dated scopes and decisions. Their status is not proof that every later
 
 ## Current references
 
+- [P16 — Windows index exclusions](2026-10-20-p16-windows-index-exclusions.md): default system/cache exclusions, advanced inclusion, truthful coverage and local trial delivery.
 - [P15 — Publish 0.1.0](2026-10-17-p15-release-0.1.0.md): release checks, source-bound Windows assets and publication evidence.
 - [P11 — Windows index service](2026-10-10-p11-windows-index-service.md): implementation and remaining real-machine lifecycle evidence; performance work deferred.
-- [P12 — Installed trial feedback](2026-10-14-p12-installed-trial-feedback.md): local prototype work; another computer's C/E failure remains unreproduced.
+- [P12 — Installed trial feedback](2026-10-14-p12-installed-trial-feedback.md): local prototype and bounded-budget recovery; the user's AF860FBC trial resolved the C/E publication blockage, with C-volume coverage gaps retained.
 - [P13 — Desktop bilingual](2026-10-15-p13-desktop-bilingual.md): language settings and versioned prototype evidence.
 - [P14 — Repository preparation](2026-10-15-p14-release-repository-preparation.md): behavior-preserving documentation/help cleanup and local repository delivery.
 

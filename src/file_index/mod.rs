@@ -32,6 +32,7 @@ pub struct Node {
 pub enum Resolved {
     Present(Node),
     Deleted,
+    Excluded,
     Unavailable(&'static str),
 }
 pub(crate) fn metadata_retryable(error: &anyhow::Error) -> bool {
@@ -56,6 +57,9 @@ pub struct Changes {
 }
 /// Checkpoints and file IDs are opaque above the platform boundary.
 pub trait VolumeSource {
+    fn policy(&self) -> Option<CollectionPolicy> {
+        None
+    }
     fn identity(&self) -> VolumeIdentity;
     fn root(&self) -> String;
     fn checkpoint(&mut self) -> Result<Checkpoint>;
@@ -139,6 +143,8 @@ impl Default for Budget {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Status {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<CollectionPolicy>,
     #[serde(default)]
     pub published_unix_ms: Option<u128>,
     pub volume: VolumeIdentity,
@@ -150,6 +156,25 @@ pub struct Status {
     pub coverage_reasons: Vec<String>,
     pub checkpoint: Checkpoint,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CollectionPolicy {
+    pub id: String,
+    pub categories: Vec<String>,
+    pub excluded_roots: usize,
+    pub unavailable_roots: usize,
+    pub skipped_resolutions: usize,
+}
+#[derive(Debug)]
+#[cfg(windows)]
+pub(crate) struct PolicyBoundaryChanged;
+#[cfg(windows)]
+impl std::fmt::Display for PolicyBoundaryChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("policy_boundary_changed")
+    }
+}
+#[cfg(windows)]
+impl std::error::Error for PolicyBoundaryChanged {}
 #[derive(Debug, Serialize)]
 pub struct Candidate {
     pub file_id: String,

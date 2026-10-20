@@ -277,7 +277,9 @@ pub(super) fn finish_storage(
                 "index.db-wal",
                 "index.db-shm",
                 "index.db-journal",
-                "worker-diagnostics.jsonl"
+                "worker-diagnostics.jsonl",
+                "policy.json",
+                "policy.pending"
             ]
             .iter()
             .any(|name| entry.file_name() == *name),

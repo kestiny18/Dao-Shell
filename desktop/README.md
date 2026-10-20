@@ -450,3 +450,42 @@ An authenticated older v1 service can provide read-only status despite a build m
 search and rebuild still require the matching build. Older services may lack stage
 fields, which are explicitly unavailable rather than guessed. The remote trial's C/E
 failure has not been reproduced on the development computer.
+
+## Windows collection scopes (P16 local prototype)
+
+This feature is part of the unpublished P16 working-tree candidate, not the
+public v0.1.0 installer. See the [P16 plan](../docs/plans/2026-10-20-p16-windows-index-exclusions.md)
+for the exact source, checks, package and missing real-machine evidence.
+
+Settings → File search offers a collection scope for each available volume:
+**Standard scope** or **Include system internals and caches**, followed by
+**Apply and rebuild**. Confirming this separate component action queues an atomic
+rebuild; it does not save model settings, grant file permissions or request UAC.
+Installing/updating the component itself still uses the existing explicit service
+management flow. Choose the scope after the desktop and worker builds match.
+
+Standard scope excludes the actual Windows directory's WinSxS, servicing,
+Installer, System32/DriverStore/FileRepository, Temp and SoftwareDistribution/Download,
+plus each volume's System Volume Information and $Recycle.Bin. Windows is located
+using its native API rather than assuming C:. The first version does not exclude
+all of Windows/System32, AppData, ProgramData, Program Files, user profiles or data
+drives, and does not guess user-profile or third-party caches. Application entries
+remain available. Dao-Shell's index files are excluded in both modes.
+
+Existing snapshots without a recorded policy are labeled legacy. They are retained
+until a successful explicit rebuild, without being represented as the newly
+requested scope. While published and requested scopes differ, indexed searches
+wait for a matching publication. A persisted, previously confirmed scope change
+can resume rebuilding after a worker restart. Reported completeness is relative
+to the published scope; exclusions remain separate from permission denial,
+sharing violations and unresolved metadata. Unverifiable rule roots remain
+included with a policy-limitation notice rather than silently losing user data.
+
+Normal project-folder renames stay incremental. Crossing an exclusion boundary or
+changing a rule root may require bounded rebuilding. Included hard-link names
+remain searchable even when another name is excluded. Reparse redirects cannot
+silently turn an exclusion into a rule over another user directory.
+
+MFT/USN may still traverse all volume records. Skipped expensive resolutions are
+operation counts, not unique file counts, and this candidate makes no measured
+performance claim. macOS/Linux collection policies are not implemented here.

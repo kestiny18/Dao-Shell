@@ -43,6 +43,35 @@ fn append_worker_failures(
     }
 }
 impl WindowsServiceIndexClient {
+    pub fn set_policy(
+        &self,
+        key: &str,
+        include_system_files: bool,
+        cancel: &Cancellation,
+    ) -> Result<serde_json::Value> {
+        controlled(cancel, |control| {
+            let health = service::health_controlled(control)?;
+            ensure!(
+                health["build"] == self.expected_build,
+                "service version mismatch"
+            );
+            let response = service::request_volume(
+                key,
+                &Request {
+                    version: VERSION,
+                    id: uuid::Uuid::new_v4().to_string(),
+                    timeout_ms: 1000,
+                    operation: Operation::SetPolicy {
+                        include_system_files,
+                    },
+                },
+                control,
+            )?;
+            Ok(
+                serde_json::json!({"state":response.error.or(response.control).unwrap_or_else(||"unavailable".into()),"status":response.status}),
+            )
+        })
+    }
     pub fn new(expected_build: String) -> Self {
         Self { expected_build }
     }
@@ -314,6 +343,8 @@ impl IndexClient for WindowsServiceIndexClient {
                         receipt.generation = response.status.generation;
                         receipt.updated_unix_ms = response.status.updated_unix_ms;
                         receipt.phase = response.status.phase;
+                        receipt.policy = response.status.policy;
+                        receipt.requested_policy = response.status.requested_policy;
                         receipt.complete = response.status.complete
                             && response.error.is_none()
                             && response.status.error.is_none();

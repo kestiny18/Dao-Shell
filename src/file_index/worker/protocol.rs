@@ -17,6 +17,9 @@ pub struct Request {
 pub enum Operation {
     Status,
     Rebuild {},
+    SetPolicy {
+        include_system_files: bool,
+    },
     Search {
         query: String,
         page_size: usize,
@@ -33,6 +36,10 @@ pub struct Hit {
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PublicStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<super::super::CollectionPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_policy: Option<String>,
     #[serde(default)]
     pub coverage_reasons: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

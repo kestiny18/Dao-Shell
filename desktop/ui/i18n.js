@@ -553,8 +553,32 @@ const messages = {
     "en": "Index update failed; try a manual rebuild and check the service if it persists"
   },
   "settings.index_update_reached_its_budget_check_the_service_and_retry": {
-    "zh": "索引更新达到当前预算；请检查服务后重试",
-    "en": "Index update reached its budget; check the service and retry"
+    "zh": "索引更新达到当前预算；请核对服务版本并生成诊断报告",
+    "en": "Index update reached its budget; check the service version and generate a diagnostic report"
+  },
+  "settings.index_budget_retrying": {
+    "zh": "正在扩大处理预算并重试",
+    "en": "Increasing the processing budget and retrying"
+  },
+  "settings.index_budget_increasing": {
+    "zh": "尚未发布本轮索引；正在有上限地扩大预算重试，旧索引保留",
+    "en": "This update is not published yet; retrying with a larger bounded budget. The previous index is retained"
+  },
+  "settings.index_budget_limit_exhausted": {
+    "zh": "已达到自动恢复处理上限；旧索引保留，请生成诊断报告，不必反复重建",
+    "en": "Automatic recovery reached its processing limit. The previous index is retained; generate a diagnostic report instead of repeatedly rebuilding"
+  },
+  "settings.index_budget_metadata": {
+    "zh": "文件元数据解析达到处理预算",
+    "en": "File metadata resolution reached its processing budget"
+  },
+  "settings.index_budget_enumeration": {
+    "zh": "文件枚举达到分页预算",
+    "en": "File enumeration reached its page budget"
+  },
+  "settings.index_budget_catchup": {
+    "zh": "文件变更追赶达到分页预算",
+    "en": "File change catch-up reached its page budget"
   },
   "settings.unmounted_volume": {
     "zh": "未挂载卷",

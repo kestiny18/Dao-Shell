@@ -169,6 +169,7 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         "ready",
         "coverage_incomplete",
         "retrying",
+        "budget_retrying",
         "rebuild_required",
         "error",
         "initializing",
@@ -180,6 +181,11 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         "cancelled",
         "stale_cursor",
         "budget_exhausted",
+        "budget_increasing_retrying",
+        "budget_limit_exhausted",
+        "budget_metadata_exhausted",
+        "budget_enumeration_exhausted",
+        "budget_catchup_exhausted",
         "request_failed",
         "maintenance_stopped",
         "storage_identity_changed",
@@ -212,6 +218,9 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
         "usn",
         "enumeration",
         "index_maintenance",
+        "budget_metadata",
+        "budget_enumeration",
+        "budget_catchup",
     ];
     let volumes:Vec<_>=status["volumes"].as_array().into_iter().flatten().take(128).enumerate().map(|(index,volume)|{
         let drive=volume["mounts"].as_array().into_iter().flatten().filter_map(Value::as_str).find(|value| {
@@ -227,6 +236,21 @@ fn safe_diagnostic(status: &Value, expected: Option<&str>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagnostic_export_preserves_bounded_budget_recovery_details() {
+        for (stage, code) in [
+            ("budget_metadata", "budget_metadata_exhausted"),
+            ("budget_enumeration", "budget_enumeration_exhausted"),
+            ("budget_catchup", "budget_catchup_exhausted"),
+        ] {
+            let status = json!({"state":"running","volumes":[{"mounts":["C:\\"],"index_status":{"phase":"budget_retrying","error":"budget_increasing_retrying","diagnostic":{"stage":stage,"code":code,"native_code":null,"raw":"SECRET"}}}]});
+            let report = safe_diagnostic(&status, None);
+            assert_eq!(report["volumes"][0]["phase"], "budget_retrying");
+            assert_eq!(report["volumes"][0]["diagnostic"]["stage"], stage);
+            assert_eq!(report["volumes"][0]["diagnostic"]["code"], code);
+            assert!(!report.to_string().contains("SECRET"));
+        }
+    }
     #[test]
     fn diagnostic_export_omits_paths_identity_and_raw_errors() {
         let status = json!({"enabled":true,"state":"version_mismatch","build":"A".repeat(64),"sid":"SECRET_SID","volumes":[{"mounts":["C:\\","C:\\SECRET_PATH"],"guid":"SECRET_GUID","worker_error":"SECRET_RAW","index_status":{"phase":"error","generation":4,"error":"request_failed","diagnostic":{"stage":"metadata_standard","code":"request_failed","native_code":5,"raw":"SECRET_RAW"}}},{"mounts":["SECRET_PATH"],"index_status":{"phase":"error"}}]});

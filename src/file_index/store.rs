@@ -126,10 +126,9 @@ impl IndexStore {
                 ensure!(cursor != page.next, "enumeration did not advance");
                 cursor = page.next;
             }
-            ensure!(
-                ended,
-                "budget_exhausted: enumeration; generation not published"
-            );
+            if !ended {
+                return Err(BudgetExceeded::Enumeration.into());
+            }
         }
         let mut meaningful_changes = rebuild;
         let mut caught = false;
@@ -148,10 +147,9 @@ impl IndexStore {
                 break;
             }
         }
-        ensure!(
-            caught,
-            "budget_exhausted: catch-up; generation not published"
-        );
+        if !caught {
+            return Err(BudgetExceeded::CatchUp.into());
+        }
         if !meaningful_changes {
             source.validate(&checkpoint)?;
             cancel.check()?;
@@ -316,10 +314,9 @@ fn reconcile(
         let mut attempt = 0;
         let result = loop {
             cancel.check()?;
-            ensure!(
-                *used < budget.max_resolutions,
-                "budget_exhausted: metadata; generation not published"
-            );
+            if *used >= budget.max_resolutions {
+                return Err(BudgetExceeded::Metadata.into());
+            }
             *used += 1;
             attempt += 1;
             match source.resolve(&id) {

@@ -95,6 +95,40 @@ pub struct Budget {
     pub max_resolutions: usize,
     pub max_pages: usize,
 }
+/// Only this typed error permits bounded maintenance budget recovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BudgetExceeded {
+    Metadata,
+    Enumeration,
+    CatchUp,
+}
+impl BudgetExceeded {
+    pub(crate) fn stage(self) -> &'static str {
+        match self {
+            Self::Metadata => "budget_metadata",
+            Self::Enumeration => "budget_enumeration",
+            Self::CatchUp => "budget_catchup",
+        }
+    }
+    #[cfg(windows)]
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Metadata => "budget_metadata_exhausted",
+            Self::Enumeration => "budget_enumeration_exhausted",
+            Self::CatchUp => "budget_catchup_exhausted",
+        }
+    }
+}
+impl std::fmt::Display for BudgetExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "budget_exhausted: {}; generation not published",
+            self.stage()
+        )
+    }
+}
+impl std::error::Error for BudgetExceeded {}
 impl Default for Budget {
     fn default() -> Self {
         Self {

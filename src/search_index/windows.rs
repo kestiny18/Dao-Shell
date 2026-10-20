@@ -18,6 +18,30 @@ use windows_sys::Win32::Storage::FileSystem::{
 pub struct WindowsServiceIndexClient {
     expected_build: String,
 }
+fn append_worker_failures(
+    reasons: &mut Vec<String>,
+    request_error: Option<String>,
+    status_error: Option<String>,
+    diagnostic: Option<FailureDiagnostic>,
+) {
+    // A missing first publication must not hide the maintenance failure.
+    for error in [request_error, status_error].into_iter().flatten() {
+        if !reasons.contains(&error) {
+            reasons.push(error);
+        }
+    }
+    if let Some(diagnostic) = diagnostic
+        && [
+            "budget_metadata_exhausted",
+            "budget_enumeration_exhausted",
+            "budget_catchup_exhausted",
+        ]
+        .contains(&diagnostic.code.as_str())
+        && !reasons.contains(&diagnostic.code)
+    {
+        reasons.push(diagnostic.code);
+    }
+}
 impl WindowsServiceIndexClient {
     pub fn new(expected_build: String) -> Self {
         Self { expected_build }
@@ -298,9 +322,12 @@ impl IndexClient for WindowsServiceIndexClient {
                             receipt.reasons.push(reason.clone());
                             receipt.complete = false;
                         }
-                        if let Some(error) = response.error.or(response.status.error) {
-                            receipt.reasons.push(error);
-                        }
+                        append_worker_failures(
+                            &mut receipt.reasons,
+                            response.error,
+                            response.status.error,
+                            response.status.diagnostic,
+                        );
                         if !receipt.complete && receipt.reasons.is_empty() {
                             receipt.reasons.push("coverage_incomplete".into());
                         }
@@ -341,6 +368,40 @@ impl IndexClient for WindowsServiceIndexClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unpublished_search_keeps_budget_failure_and_only_known_diagnostic_codes() {
+        let mut reasons = vec![];
+        append_worker_failures(
+            &mut reasons,
+            Some("index_not_ready".into()),
+            Some("budget_limit_exhausted".into()),
+            Some(FailureDiagnostic {
+                stage: "budget_metadata".into(),
+                code: "budget_metadata_exhausted".into(),
+                native_code: None,
+            }),
+        );
+        assert_eq!(
+            reasons,
+            [
+                "index_not_ready",
+                "budget_limit_exhausted",
+                "budget_metadata_exhausted"
+            ]
+        );
+        append_worker_failures(
+            &mut reasons,
+            Some("budget_limit_exhausted".into()),
+            None,
+            Some(FailureDiagnostic {
+                stage: "SECRET_STAGE".into(),
+                code: "SECRET_PRIVATE_PATH".into(),
+                native_code: None,
+            }),
+        );
+        assert_eq!(reasons.len(), 3);
+        assert!(!serde_json::to_string(&reasons).unwrap().contains("SECRET"));
+    }
     #[test]
     fn same_serial_different_guid_never_maps_candidate() {
         let volume = service::Volume {

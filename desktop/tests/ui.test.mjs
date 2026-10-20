@@ -730,6 +730,20 @@ test('stopped incompatible and disconnected services give manual recovery guidan
  }
 });
 
+test('budget recovery and final limit show bounded progress and details in both languages',async(t)=>{
+ for(const language of ['zh-CN','en']) {
+  const f=await fixture({systemLanguage:language,indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['C:\\'],index_status:{phase:'budget_retrying',error:'budget_increasing_retrying',generation:42,updated_unix_ms:1700000000000,diagnostic:{stage:'budget_metadata',code:'budget_metadata_exhausted',raw:'SECRET'}}},{mounts:['E:\\'],index_status:{phase:'error',error:'budget_limit_exhausted',diagnostic:{code:'budget_enumeration_exhausted'}}},{mounts:['F:\\'],index_status:{phase:'error',error:'budget_limit_exhausted',diagnostic:{code:'budget_catchup_exhausted'}}}]})});t.after(()=>f.dom.window.close());
+  f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();
+  const rows=f.$('index-service-volumes').children;
+  assert.match(rows[0].textContent,language==='en' ? /Increasing.*bounded budget.*metadata/ : /扩大处理预算.*有上限.*元数据/);
+  assert.match(rows[0].textContent,/42/);
+  assert.match(rows[1].textContent,language==='en' ? /processing limit.*diagnostic report.*enumeration/ : /自动恢复处理上限.*诊断报告.*枚举/);
+  assert.match(rows[2].textContent,language==='en' ? /catch-up/ : /变更追赶/);
+  assert.doesNotMatch(f.$('index-service-volumes').textContent,/SECRET|budget_retrying|budget_metadata_exhausted/);
+  assert.ok(f.calls.filter(x=>x.command==='index_service_command').every(x=>x.args.action==='status'));
+ }
+});
+
 test('exited volume worker gives explicit manual restart guidance while temporary journal loss stays retryable',async(t)=>{
  const f=await fixture({indexService:async()=>({state:'running',enabled:true,payload_ready:true,volumes:[{mounts:['E:\\'],supported:true,worker_started:false,worker_error:'worker_unavailable'},{mounts:['F:\\'],supported:true,worker_started:false,worker_error:'journal_unavailable'},{supported:false,worker_started:false,reason:'unsupported_filesystem'}]})});t.after(()=>f.dom.window.close());
  f.w.document.querySelector('[data-page="settings"]').click();await f.tick();f.w.document.querySelector('[data-settings="inventory"]').click();await f.tick();

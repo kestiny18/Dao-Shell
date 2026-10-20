@@ -10,7 +10,8 @@ pub use storage::location as experiment_storage_location;
 mod tests;
 mod transport;
 use super::{
-    Budget, Cancellation, IndexStore, SearchCursor, VolumeSource, windows::WindowsVolumeSource,
+    Budget, BudgetExceeded, Cancellation, IndexStore, SearchCursor, VolumeSource,
+    windows::WindowsVolumeSource,
 };
 use anyhow::{Result, ensure};
 use protocol::*;
@@ -132,6 +133,9 @@ fn maintenance_stopped(state: &mut PublicStatus) {
     }
 }
 fn classify(error: &anyhow::Error) -> String {
+    if error.downcast_ref::<BudgetExceeded>().is_some() {
+        return "budget_exhausted".into();
+    }
     let text = error.to_string();
     if text.contains("rebuild_required") {
         "rebuild_required"
@@ -141,14 +145,19 @@ fn classify(error: &anyhow::Error) -> String {
         "cancelled"
     } else if text.contains("stale_cursor") {
         "stale_cursor"
-    } else if text.contains("budget") {
-        "budget_exhausted"
     } else {
         "request_failed"
     }
     .into()
 }
 fn failure_diagnostic(error: &anyhow::Error) -> FailureDiagnostic {
+    if let Some(exceeded) = error.downcast_ref::<BudgetExceeded>() {
+        return FailureDiagnostic {
+            stage: exceeded.stage().into(),
+            code: exceeded.code().into(),
+            native_code: None,
+        };
+    }
     let stages = [
         ("metadata: delete-pending", "metadata_standard"),
         ("metadata: before", "metadata_identity"),
@@ -204,6 +213,54 @@ fn retry_delay(error: &anyhow::Error, attempts: &mut u32) -> Option<u64> {
     let delay = (250u64 << *attempts).min(4000);
     *attempts += 1;
     Some(delay)
+}
+struct BudgetRecovery {
+    initial: Budget,
+    current: Budget,
+    maximum: Budget,
+    attempts: u8,
+}
+impl BudgetRecovery {
+    fn new(initial: Budget) -> Self {
+        Self {
+            initial,
+            current: initial,
+            maximum: Budget {
+                max_resolutions: initial.max_resolutions.saturating_mul(8),
+                max_pages: initial.max_pages.saturating_mul(8),
+            },
+            attempts: 0,
+        }
+    }
+    fn reset(&mut self) {
+        self.current = self.initial;
+        self.attempts = 0;
+    }
+    fn increase(&mut self, error: &anyhow::Error) -> bool {
+        if error.downcast_ref::<BudgetExceeded>().is_none() || self.attempts >= 3 {
+            return false;
+        }
+        let next = Budget {
+            max_resolutions: self
+                .current
+                .max_resolutions
+                .saturating_mul(2)
+                .min(self.maximum.max_resolutions),
+            max_pages: self
+                .current
+                .max_pages
+                .saturating_mul(2)
+                .min(self.maximum.max_pages),
+        };
+        if next.max_resolutions == self.current.max_resolutions
+            && next.max_pages == self.current.max_pages
+        {
+            return false;
+        }
+        self.current = next;
+        self.attempts += 1;
+        true
+    }
 }
 pub fn run(config: Config, stop: Cancellation) -> Result<PublicStatus> {
     run_internal(config, stop, None, None)
@@ -349,13 +406,37 @@ fn run_internal(
     Ok(shared.state.lock().unwrap().clone())
 }
 fn maintain(
-    mut store: IndexStore,
-    mut source: Box<dyn WorkerSource>,
+    store: IndexStore,
+    source: Box<dyn WorkerSource>,
     shared: Arc<Shared>,
     stop: Cancellation,
     budget: usize,
     service_storage: bool,
 ) {
+    maintain_with_budget(
+        store,
+        source,
+        shared,
+        stop,
+        Budget {
+            max_resolutions: budget,
+            max_pages: 10_000,
+        },
+        service_storage,
+    );
+}
+fn maintain_with_budget(
+    mut store: IndexStore,
+    mut source: Box<dyn WorkerSource>,
+    shared: Arc<Shared>,
+    stop: Cancellation,
+    initial_budget: Budget,
+    service_storage: bool,
+) {
+    // Each attempt remains atomic. Budget growth permits four tiers (1x/2x/4x/8x)
+    // and the separate identity-race policy permits six retries. Thus an episode
+    // consumes at most 63x the initial work budget; successful tiers are retained.
+    let mut budget = BudgetRecovery::new(initial_budget);
     let mut rebuild = store.status().is_err();
     let mut delay = 100;
     let mut blocked = false;
@@ -366,6 +447,7 @@ fn maintain(
             rebuild = true;
             blocked = false;
             retry_attempts = 0;
+            budget.reset();
             shared.state.lock().unwrap().phase = "rebuilding".into();
         }
         if !blocked {
@@ -394,15 +476,7 @@ fn maintain(
             }
             let old = store.status().ok().map(|s| s.generation);
             let started = Instant::now();
-            let result = store.update(
-                source.as_mut(),
-                rebuild,
-                Budget {
-                    max_resolutions: budget,
-                    max_pages: 10000,
-                },
-                &stop,
-            );
+            let result = store.update(source.as_mut(), rebuild, budget.current, &stop);
             if diagnostics_left > 0
                 && (result.is_err() || result.as_ref().is_ok_and(|s| old != Some(s.generation)))
             {
@@ -422,6 +496,7 @@ fn maintain(
                 Ok(status) => {
                     shared.rebuild.lock().unwrap().running = false;
                     retry_attempts = 0;
+                    budget.attempts = 0;
                     rebuild = false;
                     let changed = old != Some(status.generation);
                     let mut state = shared.state.lock().unwrap();
@@ -446,7 +521,15 @@ fn maintain(
                 Err(error) => {
                     let mut state = shared.state.lock().unwrap();
                     state.diagnostic = Some(failure_diagnostic(&error));
-                    if let Some(backoff) = retry_delay(&error, &mut retry_attempts) {
+                    if stop.cancelled() {
+                        state.phase = "error".into();
+                        state.error = Some("cancelled".into());
+                        break;
+                    } else if budget.increase(&error) {
+                        delay = 1000;
+                        state.phase = "budget_retrying".into();
+                        state.error = Some("budget_increasing_retrying".into());
+                    } else if let Some(backoff) = retry_delay(&error, &mut retry_attempts) {
                         delay = backoff;
                         state.phase = "retrying".into();
                         state.error = Some("metadata_changed_retrying".into());
@@ -458,7 +541,9 @@ fn maintain(
                             "error"
                         }
                         .into();
-                        state.error = Some(if super::metadata_retryable(&error) {
+                        state.error = Some(if error.downcast_ref::<BudgetExceeded>().is_some() {
+                            "budget_limit_exhausted".into()
+                        } else if super::metadata_retryable(&error) {
                             "metadata_changed_retry_exhausted".into()
                         } else {
                             code

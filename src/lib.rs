@@ -23,3 +23,5 @@ pub mod inventory;
 pub mod runtime;
 pub mod settings;
 pub mod workspace;
+
+pub mod observation;

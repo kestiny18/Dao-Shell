@@ -26,9 +26,20 @@ pub enum Appearance {
     Dark,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComputerQuerySharing {
+    #[default]
+    Ask,
+    Enabled,
+    Disabled,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    pub computer_query_sharing: ComputerQuerySharing,
     #[serde(default)]
     pub ui_language: crate::localization::UiLanguage,
     #[serde(default)]

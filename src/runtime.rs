@@ -18,6 +18,7 @@ pub trait Interaction {
 }
 
 pub struct Runtime {
+    pub computer: crate::observation::Store,
     pub scope: Scope,
     pub objects: Objects,
     pub journal: Option<Journal>,
@@ -41,6 +42,26 @@ impl Runtime {
         self.cancel.check()?;
         if self.side_effects_blocked && matches!(name, "file_open" | "file_move_batch") {
             bail!("本轮的打开/移动已取消或有未知结果，需用户下一条指令；不能重复请求确认");
+        }
+        if self.computer.desktop && !crate::capabilities::desktop_allowed(name) {
+            bail!("unsupported");
+        }
+        if crate::observation::is_tool(name) && self.computer.desktop {
+            let value = if self.computer.sharing != crate::config::ComputerQuerySharing::Enabled {
+                serde_json::json!({"status":"error","error":if self.computer.sharing == crate::config::ComputerQuerySharing::Ask {"permission_required"} else {"permission_denied"}})
+            } else {
+                match self.computer.query(name, arguments, &self.cancel) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        json!({"status":"error","error":crate::observation::error_code(&error,&self.cancel)})
+                    }
+                }
+            };
+            if value.get("error").is_some() {
+                self.computer.delivered.push(value.clone());
+            }
+            ui.result(name, &value);
+            return Ok(crate::observation::model_projection(&value));
         }
         let value = match name {
             "file_search" => {
@@ -218,6 +239,7 @@ mod open_tests {
             last_results: vec![],
             last_search: None,
             side_effects_blocked: false,
+            computer: Default::default(),
         };
         let id = runtime.objects.insert(&path).unwrap().id;
         let mut ui = Ui::default();

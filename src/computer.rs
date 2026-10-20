@@ -33,20 +33,20 @@ pub fn overview(cancel: &Cancellation) -> Result<Value> {
     facts["device"] = json!({"os":System::long_os_version(), "host":System::host_name(), "architecture":System::cpu_arch(), "uptime_seconds":System::uptime()});
     facts["network"] = json!({"adapters":adapters,"observed_at":now(),"limits":"接口计数器的短时采样；已配置 IP 不代表互联网可用，不主动发起联网探测。"});
     cancel.check()?;
-    facts["applications"] = applications(cancel)?;
+    facts["applications"] = applications(cancel, true, true)?;
     cancel.check()?;
     Ok(facts)
 }
 
 #[cfg(not(windows))]
-fn applications(_: &Cancellation) -> Result<Value> {
+pub fn applications(_: &Cancellation, _: bool, _: bool) -> Result<Value> {
     Ok(
         json!({"items":[],"available":false,"limits":"当前平台尚未实现应用清单。","observed_at":now()}),
     )
 }
 
 #[cfg(windows)]
-fn applications(cancel: &Cancellation) -> Result<Value> {
+pub fn applications(cancel: &Cancellation, include_icons: bool, running: bool) -> Result<Value> {
     use std::collections::BTreeSet;
     use windows_sys::Win32::{
         Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS},
@@ -176,7 +176,11 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
     // Missing/slow sources simply leave the name-based fallback visible.
     let icon_started = Instant::now();
     let mut cache = std::collections::HashMap::new();
-    for (index, item) in items.iter_mut().enumerate().take(128) {
+    for (index, item) in items
+        .iter_mut()
+        .enumerate()
+        .take(if include_icons { 128 } else { 0 })
+    {
         cancel.check()?;
         if icon_started.elapsed() > std::time::Duration::from_secs(2) {
             break;
@@ -191,6 +195,11 @@ fn applications(cancel: &Cancellation) -> Result<Value> {
         }
     }
     cancel.check()?;
+    if !running {
+        return Ok(
+            json!({"items":items,"available":readable_views > 0,"partial":partial,"observed_at":now(),"limits":"Registered current-user and machine uninstall entries only; Store/portable apps may be missing. Running state not collected."}),
+        );
+    }
     let mut processes = System::new();
     processes.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,

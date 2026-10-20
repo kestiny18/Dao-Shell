@@ -63,3 +63,51 @@ pub fn definitions() -> Vec<Value> {
         ),
     ]
 }
+
+/// One desktop allowlist used by schema selection and the execution boundary.
+pub fn desktop_allowed(name: &str) -> bool {
+    matches!(name, "file_search" | "file_inspect" | "file_open")
+        || crate::observation::is_tool(name)
+}
+pub fn desktop_definitions() -> Vec<Value> {
+    let mut tools: Vec<_> = definitions()
+        .into_iter()
+        .filter(|t| {
+            matches!(
+                t["function"]["name"].as_str(),
+                Some("file_search" | "file_inspect" | "file_open")
+            )
+        })
+        .collect();
+    for (name, description, mut properties) in [
+        (
+            "resource_snapshot",
+            "Read CPU/memory/volume space with both rankings from one sample. Reuse observation_id for follow-up; omit it for current state.",
+            json!({"sections":{"type":"array","items":{"type":"string","enum":["cpu","memory","disks"]}},"sample_ms":{"type":"integer","minimum":500,"maximum":5000},"limit":{"type":"integer","minimum":1,"maximum":50}}),
+        ),
+        (
+            "process_list",
+            "Read process page sorted by cpu/memory/name. Keep filters on cursor pages. Row references are separate from file candidates.",
+            json!({"filter":{"type":"string","maxLength":128},"sort":{"type":"string","enum":["cpu","memory","name"]},"sample_ms":{"type":"integer","minimum":500,"maximum":5000},"limit":{"type":"integer","minimum":1,"maximum":50},"cursor":{"type":"string"}}),
+        ),
+        (
+            "network_snapshot",
+            "Read interface rates and IP configuration presence. Does not test internet connectivity.",
+            json!({"sample_ms":{"type":"integer","minimum":500,"maximum":5000}}),
+        ),
+        (
+            "app_list",
+            "Filter registered applications by name/publisher substring. running includes only conservative path matches; no match means unknown, not stopped or uninstalled.",
+            json!({"name":{"type":"string","maxLength":128},"publisher":{"type":"string","maxLength":128},"view":{"type":"string","enum":["installed","running"]},"limit":{"type":"integer","minimum":1,"maximum":50},"cursor":{"type":"string"},"refresh":{"type":"boolean"}}),
+        ),
+        (
+            "computer_profile",
+            "Read hardware configuration, architecture and current uptime.",
+            json!({"refresh":{"type":"boolean"}}),
+        ),
+    ] {
+        properties["observation_id"] = json!({"type":"string"});
+        tools.push(function(name, description, properties, &[]));
+    }
+    tools
+}

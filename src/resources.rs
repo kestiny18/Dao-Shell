@@ -39,7 +39,7 @@ pub fn snapshot(
     cancel: &Cancellation,
     processes_only: bool,
 ) -> Result<serde_json::Value> {
-    collect(request, cancel, processes_only, false)
+    collect(request, cancel, processes_only, false, None)
 }
 
 /// Both rankings use the same observations, before either list is truncated.
@@ -53,7 +53,38 @@ pub fn overview_snapshot(cancel: &Cancellation) -> Result<serde_json::Value> {
         cancel,
         false,
         true,
+        None,
     )
+}
+
+/// Desktop collection keeps bounded rows for local pagination, without action identities.
+pub fn query_snapshot(
+    sample_ms: u64,
+    sections: &[String],
+    cancel: &Cancellation,
+    processes: bool,
+) -> Result<serde_json::Value> {
+    if !processes && sections.iter().all(|s| s == "disks") {
+        cancel.check()?;
+        let disks = Disks::new_with_refreshed_list();
+        let rows: Vec<_> = disks.iter().map(|d| serde_json::json!({"mount":d.mount_point(),"total_bytes":(d.total_space()>0).then_some(d.total_space()),"available_bytes":(d.total_space()>0).then_some(d.available_space())})).collect();
+        return Ok(
+            serde_json::json!({"observed_at":now(),"system":{"disks":rows},"limits":"Volume space only; capacities are not summed physical disk capacity."}),
+        );
+    }
+    let mut value = collect(
+        &Request {
+            sample_ms: Some(sample_ms),
+            limit: Some(2048),
+            ..Default::default()
+        },
+        cancel,
+        processes,
+        false,
+        Some(sections),
+    )?;
+    value["facts_for_explanation"] = explanation_facts(&value);
+    Ok(value)
 }
 
 fn collect(
@@ -61,11 +92,13 @@ fn collect(
     cancel: &Cancellation,
     processes_only: bool,
     overview: bool,
+    query_sections: Option<&[String]>,
 ) -> Result<serde_json::Value> {
     let sample_ms = request.sample_ms.unwrap_or(2000);
     let limit = request.limit.unwrap_or(10);
     ensure!(
-        (500..=5000).contains(&sample_ms) && (1..=50).contains(&limit),
+        (500..=5000).contains(&sample_ms)
+            && (1..=if query_sections.is_some() { 2048 } else { 50 }).contains(&limit),
         "采样为 500–5000ms，进程上限 1–50"
     );
     let began_at = now();
@@ -140,7 +173,8 @@ fn collect(
                 .is_some_and(|p| p.start_time() == *start)
         })
         .count();
-    let rankings = overview.then(|| process_rankings(&processes, limit));
+    let rankings =
+        (overview || query_sections.is_some()).then(|| process_rankings(&processes, limit.min(50)));
     match request.sort {
         ProcessSort::Memory => processes.sort_by_key(|p| std::cmp::Reverse(p.memory_bytes)),
         ProcessSort::Cpu => processes.sort_by(|a, b| {
@@ -156,8 +190,12 @@ fn collect(
         "sort":match request.sort { ProcessSort::Memory => "memory", ProcessSort::Cpu => "cpu" },
         "limits":"短时采样；cpu_percent_total 按整机 100% 计，cpu_percent_one_core 按单核 100% 计。缺失值为 null。进程列表只含所列项，不能据此解释全部已用内存；未覆盖内核、缓存及共享内存归属。不包括 GPU、磁盘 I/O、历史活动或未保存状态，不足以确定卡顿根因。"});
     if !processes_only {
-        let disks = Disks::new_with_refreshed_list();
-        let disks: Vec<_> = disks.iter().map(|d| serde_json::json!({"mount":d.mount_point(),"total_bytes":d.total_space(),"available_bytes":d.available_space()})).collect();
+        let disks = if query_sections.is_none_or(|s| s.iter().any(|v| v == "disks")) {
+            Disks::new_with_refreshed_list()
+        } else {
+            Disks::new()
+        };
+        let disks: Vec<_> = disks.iter().map(|d| serde_json::json!({"mount":d.mount_point(),"total_bytes":(d.total_space()>0).then_some(d.total_space()),"available_bytes":(d.total_space()>0).then_some(d.available_space())})).collect();
         result["system"] = serde_json::json!({"cpu_percent":(!system.cpus().is_empty()).then_some(system.global_cpu_usage()), "memory_total_bytes":(system.total_memory()>0).then_some(system.total_memory()),
             "memory_used_bytes":(system.total_memory()>0).then_some(system.used_memory()), "memory_available_bytes":(system.total_memory()>0).then_some(system.available_memory()), "disks":disks});
     }
@@ -184,7 +222,7 @@ fn process_rankings(processes: &[Process], limit: usize) -> serde_json::Value {
     serde_json::json!({"memory":memory,"cpu":cpu})
 }
 
-fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
+pub(crate) fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
     use crate::presentation::{gib, human_bytes, percent};
     use serde_json::json;
     let processes: Vec<_> = result["processes"].as_array().into_iter().flatten().map(|p| json!({
@@ -214,6 +252,20 @@ fn explanation_facts(result: &serde_json::Value) -> serde_json::Value {
                 "total":format!("{} GiB", gib(&d["total_bytes"]))
             })).collect::<Vec<_>>()});
     }
+    if let Some(system) = result.get("system") {
+        for (raw, formatted) in [
+            ("cpu_percent", "cpu_total"),
+            ("memory_total_bytes", "memory_total"),
+            ("memory_used_bytes", "memory_used"),
+            ("memory_available_bytes", "memory_available"),
+            ("disks", "disks"),
+        ] {
+            if system.get(raw).is_none() {
+                facts["system"].as_object_mut().unwrap().remove(formatted);
+            }
+        }
+    }
+
     facts
 }
 

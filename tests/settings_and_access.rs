@@ -188,6 +188,7 @@ fn full_authority_cannot_move_without_a_durable_journal() {
         last_results: vec![],
         last_search: None,
         side_effects_blocked: false,
+        computer: Default::default(),
     };
     let error = runtime
         .call(

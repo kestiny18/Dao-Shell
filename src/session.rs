@@ -4,7 +4,7 @@ use crate::{
     capabilities::{Interaction, Runtime},
     config::Config,
     core::{Cancellation, FileObject},
-    dialogue::{Dialogue, UnavailableBeforeTools},
+    dialogue::Dialogue,
     files::Objects,
 };
 use anyhow::{Result, ensure};
@@ -25,6 +25,7 @@ pub struct Reply {
     pub error: bool,
     pub items: Vec<FileObject>,
     pub search_receipt: Option<serde_json::Value>,
+    pub observations: Vec<serde_json::Value>,
 }
 
 pub enum Action {
@@ -34,6 +35,10 @@ pub enum Action {
     OpenSelected(String),
     Reset,
     ExplainComputer(serde_json::Value),
+    QueryComputer {
+        tool: String,
+        arguments: serde_json::Value,
+    },
 }
 
 pub struct FileSession {
@@ -53,7 +58,7 @@ impl FileSession {
         language: crate::localization::Language,
     ) -> Result<Self> {
         let scope = config.scope(false)?;
-        let runtime = Runtime {
+        let mut runtime = Runtime {
             scope,
             objects: Objects::default(),
             journal: None,
@@ -61,7 +66,10 @@ impl FileSession {
             last_results: Vec::new(),
             last_search: None,
             side_effects_blocked: false,
+            computer: Default::default(),
         };
+        runtime.computer.desktop = true;
+        runtime.computer.sharing = config.computer_query_sharing;
         let (dialogue, model_error) = match config
             .model
             .as_ref()
@@ -71,7 +79,7 @@ impl FileSession {
             Some(Err(error)) => (None, Some(format!("{error:#}"))),
             None => (
                 None,
-                Some(language.choose("尚未配置模型，将按文件名搜索；可在设置 → 模型中添加", "No model configured. Search will match file names; add a model in Settings → Models.").into()),
+                Some(language.choose("自然语言需要连接模型；仍可使用文件名搜索或本地电脑状态入口", "Natural language requires a model. File-name search and local computer queries remain available.").into()),
             ),
         };
         let info = SessionInfo {
@@ -107,6 +115,7 @@ impl FileSession {
 
     pub async fn execute(&mut self, action: Action, ui: &mut dyn Interaction) -> Reply {
         self.runtime.last_search = None;
+        self.runtime.computer.delivered.clear();
         let result = match self.runtime.cancel.check() {
             Ok(()) => self.perform(action, ui).await,
             Err(error) => Err(error),
@@ -129,6 +138,7 @@ impl FileSession {
             .collect();
         Reply {
             search_receipt: self.runtime.last_search.clone(),
+            observations: self.runtime.computer.delivered.clone(),
             message,
             error,
             items,
@@ -139,6 +149,18 @@ impl FileSession {
         let selected = matches!(&action, Action::OpenSelected(_));
         match action {
             Action::ExplainComputer(snapshot) => {
+                ensure!(
+                    self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled,
+                    "{}",
+                    if self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Ask {
+                        "permission_required"
+                    } else {
+                        "permission_denied"
+                    }
+                );
+                let snapshot = crate::observation::model_projection(
+                    &json!({"kind":"resource_snapshot","observed_at":snapshot["observed_at"],"limits":snapshot["limits"],"data":snapshot}),
+                );
                 let dialogue = self.dialogue.as_mut().ok_or_else(|| {
                     anyhow::anyhow!(
                         self.language
@@ -149,34 +171,32 @@ impl FileSession {
                 dialogue.turn(self.language.choose("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", "Briefly explain the local disk, CPU and memory snapshot. State its observation time and limits. Analyze only the supplied facts and do not call file tools."), &mut self.runtime, ui).await
             }
             Action::Say(input) => {
-                ensure!(!input.trim().is_empty(), "请输入你想找的文件");
+                ensure!(!input.trim().is_empty(), "请输入查询 / Enter a query");
                 ensure!(input.len() <= 16 * 1024, "单次输入不超过 16KB");
-                let notice = if let Some(dialogue) = self.dialogue.as_mut() {
-                    match dialogue.turn(&input, &mut self.runtime, ui).await {
-                        Err(error) if error.is::<UnavailableBeforeTools>() => {
-                            dialogue.reset();
-                            if self.language == crate::localization::Language::Chinese {
-                                format!("当前模型不可用：{error}。尝试用文件名搜索。")
-                            } else {
-                                "The model is unavailable. Trying file-name search.".into()
-                            }
-                        }
-                        result => return result,
-                    }
-                } else if self.info.model.is_some() {
-                    self.language.choose("当前模型不可用，请检查模型配置。尝试用文件名搜索。", "The model is unavailable. Check its configuration. Trying file-name search.").into()
-                } else {
+                let dialogue = self.dialogue.as_mut().ok_or_else(|| anyhow::anyhow!(self.language.choose("自然语言需要连接模型；请在设置连接模型，或使用文件名搜索/查看电脑状态。", "Natural language requires a model. Connect one in Settings, or use file-name search / local computer status.")))?;
+                dialogue.turn(&input, &mut self.runtime, ui).await
+            }
+            Action::QueryComputer { tool, arguments } => {
+                ui.progress(
                     self.language
-                        .choose(
-                            "尚未配置模型，尝试用文件名搜索。",
-                            "No model configured. Trying file-name search.",
-                        )
-                        .into()
-                };
-                self.runtime.cancel.check()?;
-                ui.progress(&notice);
-                let result = self.search(&input, ui)?;
-                Ok(format!("{notice}\n{}\n{result}", self.language.choose("按原输入匹配文件名，不理解自然语言；可改用简短文件名关键词。", "Matches file names using the original input, without understanding natural language. Try a short file-name keyword.")))
+                        .choose("正在查询电脑状态……", "Reading computer status…"),
+                );
+                let value = self
+                    .runtime
+                    .computer
+                    .query(&tool, arguments, &self.runtime.cancel)
+                    .map_err(|e| {
+                        anyhow::anyhow!(crate::observation::error_code(&e, &self.runtime.cancel))
+                    })?;
+                ui.result(&tool, &value);
+                // Local viewing is independent of permission to send data to a model.
+                Ok(self
+                    .language
+                    .choose(
+                        "本地观测已完成；请查看观测卡。",
+                        "Local observation complete. See the observation card.",
+                    )
+                    .into())
             }
             Action::Search(query) => self.search(&query, ui),
             Action::Open(id) | Action::OpenSelected(id) => {
@@ -201,6 +221,7 @@ impl FileSession {
             }
             Action::Reset => {
                 self.runtime.objects.reset();
+                self.runtime.computer.reset();
                 self.runtime.last_results.clear();
                 self.runtime.side_effects_blocked = false;
                 if let Some(dialogue) = &mut self.dialogue {

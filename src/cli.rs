@@ -188,6 +188,7 @@ pub async fn run(args: Args) -> Result<()> {
         last_results: Vec::new(),
         last_search: None,
         side_effects_blocked: false,
+        computer: Default::default(),
     };
     chat(&config, &mut runtime).await
 }

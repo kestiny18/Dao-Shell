@@ -11,6 +11,9 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub trait Interaction {
+    fn confirm_app_action(&mut self, _: &Value) -> Result<bool> {
+        Ok(false)
+    }
     fn confirm_move(&mut self, operation: &Operation) -> Result<bool>;
     fn confirm_open(&mut self, object: &FileObject) -> Result<bool>;
     fn progress(&mut self, text: &str);
@@ -18,6 +21,7 @@ pub trait Interaction {
 }
 
 pub struct Runtime {
+    pub application_actions: crate::application_actions::Actions,
     pub computer: crate::observation::Store,
     pub scope: Scope,
     pub objects: Objects,
@@ -45,6 +49,47 @@ impl Runtime {
         }
         if self.computer.desktop && !crate::capabilities::desktop_allowed(name) {
             bail!("unsupported");
+        }
+        if self.computer.desktop && crate::application_actions::is_tool(name) {
+            if (name != "app_targets"
+                && self.computer.sharing != crate::config::ComputerQuerySharing::Enabled)
+                || (name == "app_targets" && arguments["kind"] == "close")
+            {
+                self.side_effects_blocked = true;
+                self.application_actions.block_turn();
+            }
+            let value = if self.computer.sharing != crate::config::ComputerQuerySharing::Enabled {
+                json!({"error":if self.computer.sharing==crate::config::ComputerQuerySharing::Ask {"permission_required"}else{"permission_denied"}})
+            } else if name == "app_targets" {
+                match self.application_actions.targets(arguments, &self.cancel) {
+                    Ok(mut value) => {
+                        let local = value.clone();
+                        ui.result(name, &local);
+                        value.as_object_mut().unwrap().remove("local_items");
+                        return Ok(value);
+                    }
+                    Err(error) => json!({"error":crate::application_actions::public_error(&error)}),
+                }
+            } else {
+                // One action plan per turn across app tools and file_open. Exact repeated
+                // app calls are served from the engine's receipt, without another prompt.
+                self.side_effects_blocked = true;
+                match self
+                    .application_actions
+                    .action(name, arguments, &self.cancel, ui)
+                {
+                    Ok(value) => value,
+                    Err(error) => json!({"error":crate::application_actions::public_error(&error)}),
+                }
+            };
+            if matches!(
+                value["error"].as_str(),
+                Some("permission_required" | "permission_denied")
+            ) {
+                self.computer.delivered.push(value.clone());
+            }
+            ui.result(name, &value);
+            return Ok(value);
         }
         if crate::observation::is_tool(name) && self.computer.desktop {
             let value = if self.computer.sharing != crate::config::ComputerQuerySharing::Enabled {
@@ -101,6 +146,9 @@ impl Runtime {
                 )?)?
             }
             "file_open" => {
+                if self.computer.desktop {
+                    self.application_actions.block_turn();
+                }
                 let request: Reference = serde_json::from_value(arguments)?;
                 self.open_using(&request.object_id, false, ui, files::open)?
             }
@@ -241,6 +289,7 @@ mod open_tests {
             last_search: None,
             side_effects_blocked: false,
             computer: Default::default(),
+            application_actions: Default::default(),
         };
         let id = runtime.objects.insert(&path).unwrap().id;
         let mut ui = Ui::default();

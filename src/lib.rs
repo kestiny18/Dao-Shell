@@ -25,3 +25,5 @@ pub mod settings;
 pub mod workspace;
 
 pub mod observation;
+
+pub mod application_actions;

@@ -223,3 +223,12 @@ Implementation: PLANNED
 独立测试、评审仍由用户触发。建议在实际日常程序试用前针对实例身份、确认归属、窗口消息竞态和崩溃未知做独立检查，本方案不自动派发角色。
 
 建议实施顺序 T0 → T1 → T2 → T3 → T4。T2 和 T3 分别形成可验证的小步提交；当前设计不授权实施、真实应用操作或发布。
+
+
+## 2026-10-22 实施检查点
+
+T0 已用专用隐藏窗口实际验证：正常处理 WM_CLOSE 与忽略消息的结果不同，投递不等于退出；核验后销毁会被后续复核识别。5 秒/2,414 次受控创建销毁未观察到 HWND 数值重用，不能证明没有竞态。没有向已销毁、可能被其他程序复用的 stale HWND 发送测试消息。现有 Win32 发送接口不能把预期窗口/进程身份作为原子条件；正常关闭 provider 保持 `close_identity_not_atomic`，T3 正常关闭 BLOCKED，不自动替代强杀。主 Agent 已确认按设计安全退路继续其余范围，整期不得标 READY。
+
+第一批核心检查：`check --locked`、桌面 `check` 通过；application_actions 定向 8 passed/1 ignored，另显式构建并运行专用 `phase2_owned_app` 原生测试 1 passed。该原生测试只操作临时目录复制的专用应用，验证普通权限启动、环境排除与固定工作目录、进程创建回执/原实例核对/强制结束，以及短命启动器仍应记录已创建进程。没有操作真实办公应用、浏览器或用户文档。
+
+实际窗口证据：忽略目录 `.tools/phase2-window-boundary-20261022.json`；源程序 `examples/window_close_boundary.rs`。原生启动/结束源夹具 `examples/phase2_owned_app.rs` 与 `application_actions::tests::owned_native_launch_environment_receipt_and_force_termination`。后续 UI 和完整回归待完成。

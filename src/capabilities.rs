@@ -68,6 +68,7 @@ pub fn definitions() -> Vec<Value> {
 pub fn desktop_allowed(name: &str) -> bool {
     matches!(name, "file_search" | "file_inspect" | "file_open")
         || crate::observation::is_tool(name)
+        || crate::application_actions::is_tool(name)
 }
 pub fn desktop_definitions() -> Vec<Value> {
     let mut tools: Vec<_> = definitions()
@@ -108,6 +109,28 @@ pub fn desktop_definitions() -> Vec<Value> {
     ] {
         properties["observation_id"] = json!({"type":"string"});
         tools.push(function(name, description, properties, &[]));
+    }
+    tools.push(function("app_targets","Find supported application launch entries or exact current-user process instances. kind close is currently unavailable (close_identity_not_atomic); never substitute termination. Old observation refs require explicit reselection. Multiple matches require the user's choice. query is a name substring, never a command.",json!({"kind":{"type":"string","enum":["launch","close","terminate"]},"query":{"type":"string","maxLength":128},"observation_id":{"type":"string"},"row_ref":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":50},"cursor":{"type":"string"}}),&["kind"]));
+    for (tool, description) in [
+        (
+            "app_launch",
+            "Prepare ordinary launch from a supported target and wait for LOCAL user confirmation. One state-changing action per turn. Created process does not prove a visible/ready application.",
+        ),
+        (
+            "app_close",
+            "Normal close currently unavailable: no verified atomic window-identity dispatch provider. Do not fall back to force termination.",
+        ),
+        (
+            "process_terminate",
+            "Prepare force termination of ONE exact instance only when user explicitly requests force termination; unsaved data can be lost. Wait for LOCAL confirmation; never kill by name or process tree.",
+        ),
+    ] {
+        tools.push(function(
+            tool,
+            description,
+            json!({"target_ref":{"type":"string"}}),
+            &["target_ref"],
+        ));
     }
     tools
 }

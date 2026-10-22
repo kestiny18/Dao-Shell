@@ -26,6 +26,8 @@ pub struct Reply {
     pub items: Vec<FileObject>,
     pub search_receipt: Option<serde_json::Value>,
     pub observations: Vec<serde_json::Value>,
+    pub action_receipts: Vec<serde_json::Value>,
+    pub action_targets: Vec<serde_json::Value>,
 }
 
 pub enum Action {
@@ -35,6 +37,13 @@ pub enum Action {
     OpenSelected(String),
     Reset,
     ExplainComputer(serde_json::Value),
+    Application {
+        tool: String,
+        arguments: serde_json::Value,
+    },
+    ActionReceipts,
+    ReconcileAction(String),
+    ClearCompletedActions,
     QueryComputer {
         tool: String,
         arguments: serde_json::Value,
@@ -67,6 +76,7 @@ impl FileSession {
             last_search: None,
             side_effects_blocked: false,
             computer: Default::default(),
+            application_actions: Default::default(),
         };
         runtime.computer.desktop = true;
         runtime.computer.sharing = config.computer_query_sharing;
@@ -96,6 +106,17 @@ impl FileSession {
         })
     }
 
+    pub fn set_action_directory(&mut self, directory: std::path::PathBuf, config: &Config) {
+        self.runtime.application_actions.directory = Some(directory);
+        self.runtime.application_actions.excluded_environment = config
+            .models
+            .connections
+            .iter()
+            .map(|c| c.api_key_env.clone())
+            .chain(config.model.iter().map(|c| c.api_key_env.clone()))
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
     pub fn set_inventory(&mut self, inventory: std::sync::Arc<crate::inventory::Inventory>) {
         self.runtime.objects.set_inventory(inventory);
     }
@@ -116,6 +137,8 @@ impl FileSession {
     pub async fn execute(&mut self, action: Action, ui: &mut dyn Interaction) -> Reply {
         self.runtime.last_search = None;
         self.runtime.computer.delivered.clear();
+        self.runtime.application_actions.begin_turn();
+        self.runtime.side_effects_blocked = false;
         let result = match self.runtime.cancel.check() {
             Ok(()) => self.perform(action, ui).await,
             Err(error) => Err(error),
@@ -139,6 +162,8 @@ impl FileSession {
         Reply {
             search_receipt: self.runtime.last_search.clone(),
             observations: self.runtime.computer.delivered.clone(),
+            action_receipts: self.runtime.application_actions.delivered.clone(),
+            action_targets: self.runtime.application_actions.target_results.clone(),
             message,
             error,
             items,
@@ -169,6 +194,70 @@ impl FileSession {
                 })?;
                 dialogue.observe_local("resource_snapshot", &snapshot);
                 dialogue.turn(self.language.choose("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", "Briefly explain the local disk, CPU and memory snapshot. State its observation time and limits. Analyze only the supplied facts and do not call file tools."), &mut self.runtime, ui).await
+            }
+            Action::Application { tool, arguments } => {
+                ensure!(crate::application_actions::is_tool(&tool), "unsupported");
+                let _value = if tool == "app_targets" {
+                    let value = self
+                        .runtime
+                        .application_actions
+                        .targets(arguments, &self.runtime.cancel)?;
+                    ui.result("app_targets", &value);
+                    value
+                } else {
+                    self.runtime.application_actions.action(
+                        &tool,
+                        arguments,
+                        &self.runtime.cancel,
+                        ui,
+                    )?
+                };
+                Ok(if tool == "app_targets" {
+                    self.language
+                        .choose("请选择已核验的具体目标。", "Select a verified target.")
+                        .into()
+                } else {
+                    self.language
+                        .choose(
+                            "请查看本地动作回执；派发和退出证据分别列出。",
+                            "See the local action receipt for separate dispatch and exit evidence.",
+                        )
+                        .into()
+                })
+            }
+            Action::ActionReceipts => {
+                let value = self.runtime.application_actions.receipts()?;
+                ui.result("app_action_history", &value);
+                Ok(self
+                    .language
+                    .choose("本地操作回执已载入。", "Local action receipts loaded.")
+                    .into())
+            }
+            Action::ReconcileAction(id) => {
+                let value = self.runtime.application_actions.reconcile(&id)?;
+                self.runtime
+                    .application_actions
+                    .delivered
+                    .push(value.clone());
+                ui.result("app_action_receipt", &value);
+                Ok(self
+                    .language
+                    .choose(
+                        "仅核对原目标，没有重放操作。",
+                        "Checked the original target without replaying the action.",
+                    )
+                    .into())
+            }
+            Action::ClearCompletedActions => {
+                let value = self.runtime.application_actions.clear_completed()?;
+                ui.result("app_action_history", &value);
+                Ok(self
+                    .language
+                    .choose(
+                        "已清理完成回执，未知结果保留。",
+                        "Completed receipts cleared; unknown outcomes retained.",
+                    )
+                    .into())
             }
             Action::Say(input) => {
                 ensure!(!input.trim().is_empty(), "请输入查询 / Enter a query");
@@ -222,6 +311,7 @@ impl FileSession {
             Action::Reset => {
                 self.runtime.objects.reset();
                 self.runtime.computer.reset();
+                self.runtime.application_actions.reset();
                 self.runtime.last_results.clear();
                 self.runtime.side_effects_blocked = false;
                 if let Some(dialogue) = &mut self.dialogue {

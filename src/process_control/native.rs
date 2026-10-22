@@ -52,6 +52,23 @@ fn sid(h: HANDLE) -> Result<String, &'static str> {
         return Err("identity_unavailable");
     }
     let token = Handle(raw);
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut elevation_size = 0;
+    if unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenElevation,
+            (&mut elevation as *mut TOKEN_ELEVATION).cast(),
+            std::mem::size_of_val(&elevation) as u32,
+            &mut elevation_size,
+        )
+    } == 0
+    {
+        return Err("identity_unavailable");
+    }
+    if elevation.TokenIsElevated != 0 {
+        return Err("elevated_process");
+    }
     let mut needed = 0;
     unsafe {
         GetTokenInformation(token.0, TokenUser, ptr::null_mut(), 0, &mut needed);
@@ -209,9 +226,14 @@ pub(super) fn terminate(expected: &Identity, cancel: &Cancellation) -> &'static 
             "access_denied"
         };
     }
-    match unsafe { WaitForSingleObject(h.0, 50) } {
-        WAIT_OBJECT_0 => "terminated",
-        _ => "pending",
+    let began = std::time::Instant::now();
+    loop {
+        if unsafe { WaitForSingleObject(h.0, 50) } == WAIT_OBJECT_0 {
+            return "terminated";
+        }
+        if cancel.is_cancelled() || began.elapsed() >= std::time::Duration::from_secs(3) {
+            return "pending";
+        }
     }
 }
 

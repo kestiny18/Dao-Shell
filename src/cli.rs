@@ -189,6 +189,7 @@ pub async fn run(args: Args) -> Result<()> {
         last_search: None,
         side_effects_blocked: false,
         computer: Default::default(),
+        application_actions: Default::default(),
     };
     chat(&config, &mut runtime).await
 }

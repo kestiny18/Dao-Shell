@@ -1,7 +1,7 @@
 //! Narrow native process identity and termination; no command or model tool surface.
 use crate::core::Cancellation;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Identity {
     pub pid: u32,
     pub created: String,

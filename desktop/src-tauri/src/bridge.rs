@@ -320,6 +320,10 @@ impl Bridge {
         }
         let action = match kind {
             "say" => Action::Say(input),
+            "app-targets"|"app-launch"|"app-close"|"process-terminate" => Action::Application {tool:kind.replace('-',"_"),arguments:serde_json::from_str(&input).map_err(|_|"invalid_arguments")?},
+            "action-receipts" => Action::ActionReceipts,
+            "reconcile-action" => Action::ReconcileAction(input),
+            "clear-completed-actions" => Action::ClearCompletedActions,
             "computer" => {
                 let value: Value = serde_json::from_str(&input).map_err(|_| "invalid_arguments")?;
                 Action::QueryComputer {
@@ -375,6 +379,7 @@ impl Bridge {
                 changed,
             )
         };
+        session.set_action_directory(self.path().with_file_name("app-actions"),&config);
         session.set_inventory(self.inventory.clone());
         session.set_index(self.index_service.client(config.access_mode));
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -452,6 +457,14 @@ impl DesktopInteraction<'_> {
     }
 }
 impl Interaction for DesktopInteraction<'_> {
+    fn confirm_app_action(&mut self, plan:&Value)->anyhow::Result<bool> {
+        let confirmation=self.bridge.control.confirmation(Duration::from_secs(90))?;
+        self.send(json!({"kind":"action_prepared","request_id":confirmation.id,"plan":plan,"expires_in_seconds":90}));
+        let approved=self.bridge.control.wait(&confirmation);
+        self.send(json!({"kind":"confirmation_closed","request_id":confirmation.id}));
+        Ok(approved)
+    }
+
     fn confirm_move(&mut self, _: &Operation) -> anyhow::Result<bool> {
         Ok(false)
     }

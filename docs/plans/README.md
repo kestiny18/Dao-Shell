@@ -6,7 +6,7 @@ Plans are dated scopes and decisions. Their status is not proof that every later
 
 ## Current references
 
-- [Computer capabilities roadmap](2026-10-20-computer-capabilities-roadmap.md): four-phase scope; [Phase 3 diagnostics](2026-10-22-phase3-diagnostics-design.md) and [Phase 4 maintenance](2026-10-22-phase4-maintenance-design.md) are design-only plans. Phase 2 normal close remains blocked; later designs do not close that gap.
+- [Computer capabilities roadmap](2026-10-20-computer-capabilities-roadmap.md): four-phase scope; [Phase 3 diagnostics](2026-10-22-phase3-diagnostics-design.md) has a [self-tested local prototype](../devlog/2026-10-22-phase3-diagnostics.md); [Phase 4 maintenance](2026-10-22-phase4-maintenance-design.md) remains design-only. Phase 2 normal close remains blocked; the diagnostic delivery does not close that gap.
 
 - [P16 — Windows index exclusions](2026-10-20-p16-windows-index-exclusions.md): default system/cache exclusions, advanced inclusion, truthful coverage and local trial delivery.
 - [P15 — Publish 0.1.0](2026-10-17-p15-release-0.1.0.md): release checks, source-bound Windows assets and publication evidence.

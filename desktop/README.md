@@ -566,3 +566,56 @@ The isolated Debug smoke uses only a dedicated fixture tree, marker and explicit
 isolated config. Its fixture-discovery hook is compiled out of Release and is off
 by default; model parameters cannot enable it. It never modifies the real Start
 menu. See [Phase 2 delivery and trial commands](../docs/devlog/2026-10-22-phase2-app-actions.md).
+
+
+## Phase 3 diagnostics (local prototype)
+
+**Short diagnostics** provides 30/60-second observation with selected CPU, memory,
+network, selected-process I/O, GPU and power domains; intervals are 1/2 seconds.
+Query processes first to select up to five precise instances. Live charts remain
+local and require no model; Stop preserves completed samples and a stopped summary.
+Missing values remain gaps. CPU/rate metrics are interval averages; point-value
+means use right-endpoint rectangles only across adjacent valid readings. Summary
+cards show min/max, weighted mean, valid/missing count and display-threshold time,
+which is not evidence of a fault. Comparison requires two live session IDs and
+matching definitions/identities. Full series expire after ten minutes; at most four
+cached diagnostic observations and 8 MiB are retained, alongside the earlier 8 MiB
+snapshot budget. Restart restores visible summaries, not live series or targets.
+
+The optional **Share and explain** button requires computer sharing and makes one
+model request with no tools. Model-driven observation also sends only a bounded
+final summary and at most twenty representative points, never per-second requests.
+The full local sequence survives model failures. Projection may omit metrics or
+points to fit its model budget and reports metric omissions.
+
+Read network configuration without active probes. For active diagnostics, enter an
+ASCII hostname (or IPv4), exact port and public/local scope, tick the local target
+confirmation, then register and probe. No probe happens at registration. Targets
+expire after three minutes and are consumed once; the model cannot register hosts,
+URLs, paths or ports. DNS uses the system resolver, TCP/HTTPS explicitly bypass
+application proxies, and HTTPS HEAD pins checked addresses, validates TLS and never
+follows redirects or sends credentials. The result describes that direct endpoint
+path, not global connectivity or system-proxy/VPN health. Public address validation
+is deliberately conservative, including restricted IPv6 ranges; IPv6 literals,
+non-root paths, query strings, redirects and authenticated probes are unsupported.
+
+GPU coverage is bounded to independently identified engine counters and separate
+adapter dedicated/shared memory counters; it never sums engines into a whole-GPU
+percentage. Driver counters may be missing. I/O is all process I/O, not physical
+disk throughput. Power reports unknown estimates and battery absence distinctly.
+Installed-app viewing adds entries associated with current-user package registration
+and locally registered EXEs within existing file authorization. Registration grants
+discovery only; these new entries remain launch_unavailable. Existing running-match
+coverage is unchanged. Startup viewing reads Run/RunOnce and Startup folders;
+registration does not prove enabled state, and command/path text stays local.
+
+Build and run the isolated fixed-model/local-TLS self-test with a NEW output folder:
+
+```powershell
+.\scripts\desktop.ps1 build
+node scripts/diagnostics-smoke.mjs .tools/my-new-phase3-trial desktop/src-tauri/target/debug/dao-shell-desktop.exe
+```
+
+Only the isolated desktop and controlled localhost servers are used; no cloud key,
+real application action, system repair, service or fourth-phase maintenance runs.
+See [Phase 3 evidence and limits](../docs/devlog/2026-10-22-phase3-diagnostics.md).

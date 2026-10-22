@@ -1,12 +1,12 @@
 # 第四期计划与方案：经确认的电脑维护
 
 Date: 2026-10-22 (Asia/Shanghai)
-Implementation: PLANNED
-Self-test: N/A (design only)
+Implementation: IN_PROGRESS
+Self-test: PENDING
 Independent testing: NOT_RUN
 Independent review: NOT_RUN
-Authorization: 用户要求补齐第三期、第四期计划与方案；本轮仅设计，无安装、更新、卸载、设置修改或发布授权。
-Baseline: `f7f4df7`
+Authorization: 2026-10-22 用户明确批准第四期开发及小步本地提交；写入自测仅隔离夹具/独立Windows测试环境，不在个人工作机装卸真实软件、修改真实Startup或清理真实DNS。不推送、发布或安装服务。
+Baseline: `5bf53f8f84b9071ba15a485162152d216b782f31`
 Parent: [整体分期](2026-10-20-computer-capabilities-roadmap.md)
 Previous: [第三期诊断方案](2026-10-22-phase3-diagnostics-design.md)
 

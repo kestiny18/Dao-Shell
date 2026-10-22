@@ -28,6 +28,7 @@ pub struct Reply {
     pub observations: Vec<serde_json::Value>,
     pub action_receipts: Vec<serde_json::Value>,
     pub action_targets: Vec<serde_json::Value>,
+    pub maintenance_results: Vec<serde_json::Value>,
 }
 
 pub enum Action {
@@ -45,6 +46,11 @@ pub enum Action {
     ReconcileAction(String),
     ClearCompletedActions,
     DiagnosticLocal(serde_json::Value),
+    MaintenanceLocal(serde_json::Value),
+    Maintenance {
+        tool: String,
+        arguments: serde_json::Value,
+    },
     ExplainDiagnostic(String),
     QueryComputer {
         tool: String,
@@ -79,6 +85,7 @@ impl FileSession {
             side_effects_blocked: false,
             computer: Default::default(),
             application_actions: Default::default(),
+            maintenance: Default::default(),
         };
         runtime.computer.desktop = true;
         runtime.computer.sharing = config.computer_query_sharing;
@@ -109,9 +116,11 @@ impl FileSession {
     }
 
     pub fn set_action_context(&mut self, session_id: &str, execution_id: &str, revision: &str) {
+        self.runtime.maintenance.context = json!({"session_id":session_id,"execution_id":execution_id,"configuration_revision":revision});
         self.runtime.application_actions.context = json!({"session_id":session_id,"execution_id":execution_id,"configuration_revision":revision});
     }
     pub fn set_action_directory(&mut self, directory: std::path::PathBuf, config: &Config) {
+        self.runtime.maintenance.directory = directory.parent().map(|p| p.join("maintenance"));
         self.runtime.application_actions.directory = Some(directory);
         self.runtime.application_actions.excluded_environment = config
             .models
@@ -143,6 +152,7 @@ impl FileSession {
         self.runtime.last_search = None;
         self.runtime.computer.delivered.clear();
         self.runtime.application_actions.begin_turn();
+        self.runtime.maintenance.begin_turn();
         self.runtime.side_effects_blocked = false;
         let result = match self.runtime.cancel.check() {
             Ok(()) => self.perform(action, ui).await,
@@ -169,6 +179,7 @@ impl FileSession {
             observations: self.runtime.computer.delivered.clone(),
             action_receipts: self.runtime.application_actions.delivered.clone(),
             action_targets: self.runtime.application_actions.target_results.clone(),
+            maintenance_results: self.runtime.maintenance.delivered.clone(),
             message,
             error,
             items,
@@ -178,6 +189,60 @@ impl FileSession {
     async fn perform(&mut self, action: Action, ui: &mut dyn Interaction) -> Result<String> {
         let selected = matches!(&action, Action::OpenSelected(_));
         match action {
+            Action::MaintenanceLocal(args) => {
+                let v = self
+                    .runtime
+                    .maintenance
+                    .local(args)
+                    .map_err(|e| anyhow::anyhow!(crate::software::store::error_code(&e)))?;
+                self.runtime.maintenance.delivered.push(v.clone());
+                ui.result("maintenance_result", &v);
+                if self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled
+                    && let Some(dialogue) = &mut self.dialogue
+                {
+                    dialogue.observe_local(
+                        "maintenance_local",
+                        &crate::software::store::projection(&v),
+                    );
+                }
+                Ok(self
+                    .language
+                    .choose("请查看本地维护结果。", "See the local maintenance result.")
+                    .into())
+            }
+            Action::Maintenance { tool, arguments } => {
+                ensure!(crate::software::store::is_tool(&tool), "unsupported");
+                if crate::software::store::is_write(&tool) {
+                    ensure!(
+                        !self.runtime.side_effects_blocked,
+                        "side_effect_already_attempted"
+                    );
+                    self.runtime.side_effects_blocked = true;
+                    self.runtime.application_actions.block_turn();
+                }
+                let value = self
+                    .runtime
+                    .maintenance
+                    .call(&tool, arguments, &self.runtime.cancel, ui)
+                    .map_err(|e| anyhow::anyhow!(crate::software::store::error_code(&e)))?;
+                self.runtime.maintenance.delivered.push(value.clone());
+                ui.result("maintenance_result", &value);
+                if self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled
+                    && let Some(dialogue) = &mut self.dialogue
+                {
+                    dialogue.observe_local(
+                        "maintenance_local",
+                        &crate::software::store::projection(&value),
+                    );
+                }
+                Ok(self
+                    .language
+                    .choose(
+                        "请查看维护方案与回执。",
+                        "See the maintenance plan and receipt.",
+                    )
+                    .into())
+            }
             Action::ExplainDiagnostic(id) => {
                 ensure!(
                     self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled,
@@ -215,6 +280,13 @@ impl FileSession {
                 dialogue.turn(self.language.choose("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", "Briefly explain the local disk, CPU and memory snapshot. State its observation time and limits. Analyze only the supplied facts and do not call file tools."), &mut self.runtime, ui).await
             }
             Action::Application { tool, arguments } => {
+                ensure!(
+                    !self.runtime.maintenance.unresolved(),
+                    "maintenance_reconciliation_required"
+                );
+                if tool != "app_targets" {
+                    self.runtime.maintenance.used = true;
+                }
                 ensure!(crate::application_actions::is_tool(&tool), "unsupported");
                 let value = if tool == "app_targets" {
                     let value = self
@@ -379,6 +451,7 @@ impl FileSession {
                     .into())
             }
             Action::Reset => {
+                self.runtime.maintenance.reset();
                 self.runtime.objects.reset();
                 self.runtime.computer.reset();
                 self.runtime.application_actions.reset();

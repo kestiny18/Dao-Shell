@@ -69,6 +69,7 @@ pub fn desktop_allowed(name: &str) -> bool {
     matches!(name, "file_search" | "file_inspect" | "file_open")
         || crate::observation::is_tool(name)
         || crate::application_actions::is_tool(name)
+        || crate::software::store::is_tool(name)
 }
 pub fn desktop_definitions() -> Vec<Value> {
     let mut tools: Vec<_> = definitions()
@@ -135,6 +136,45 @@ pub fn desktop_definitions() -> Vec<Value> {
             json!({"target_ref":{"type":"string"}}),
             &["target_ref"],
         ));
+    }
+    for (name, props, required) in [
+        (
+            "software_search",
+            json!({"query":{"type":"string","maxLength":256},"source_ref":{"type":"string"}}),
+            vec!["query", "source_ref"],
+        ),
+        (
+            "software_inspect",
+            json!({"package_ref":{"type":"string"}}),
+            vec!["package_ref"],
+        ),
+        (
+            "software_install",
+            json!({"package_ref":{"type":"string"},"version_ref":{"type":"string"},"scope":{"type":"string","enum":["user","system"]}}),
+            vec!["package_ref", "version_ref", "scope"],
+        ),
+        (
+            "software_upgrade",
+            json!({"installed_ref":{"type":"string"},"version_ref":{"type":"string"}}),
+            vec!["installed_ref", "version_ref"],
+        ),
+        (
+            "software_uninstall",
+            json!({"installed_ref":{"type":"string"}}),
+            vec!["installed_ref"],
+        ),
+        (
+            "startup_change",
+            json!({"startup_ref":{"type":"string"},"mode":{"type":"string","enum":["disable","restore"]}}),
+            vec!["startup_ref", "mode"],
+        ),
+        (
+            "network_maintenance",
+            json!({"kind":{"type":"string","enum":["flush_dns_cache"]}}),
+            vec!["kind"],
+        ),
+    ] {
+        tools.push(function(name,"Use only current locally issued references. Every write needs an immutable local confirmation. One side effect per user turn; refusal/cancellation/unknown forbids substitutes. Never invent source/version/scope, infer absence from incomplete search, accept agreements, escalate, force close, or retry an unknown outcome.",props,&required));
     }
     tools
 }

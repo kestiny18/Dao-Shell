@@ -190,6 +190,7 @@ fn full_authority_cannot_move_without_a_durable_journal() {
         side_effects_blocked: false,
         computer: Default::default(),
         application_actions: Default::default(),
+        maintenance: Default::default(),
     };
     let error = runtime
         .call(

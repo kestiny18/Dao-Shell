@@ -51,6 +51,8 @@ pub struct Plan {
     pub operation: Operation,
     pub package: Package,
     pub expires_at: i64,
+    #[serde(default)]
+    pub context: serde_json::Value,
 }
 impl Plan {
     pub fn prepare(operation: Operation, package: Package) -> Result<Self> {
@@ -98,6 +100,7 @@ impl Plan {
             operation,
             package,
             expires_at: chrono::Utc::now().timestamp() + 300,
+            context: serde_json::Value::Null,
         })
     }
     pub fn revalidate(&self, current: &Package, accepted_digest: Option<&str>) -> Result<()> {

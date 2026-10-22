@@ -33,8 +33,8 @@ impl NativeProvider {
             .GetPackageCatalogByName(&HSTRING::from("winget"))?;
         let info = remote.Info()?;
         ensure!(
-            info.Id()?.to_string() == SOURCE
-                && info.Type()?.to_string() == "Microsoft.PreIndexed.Package"
+            info.Id()? == SOURCE
+                && info.Type()? == "Microsoft.PreIndexed.Package"
                 && matches!(
                     info.Argument()?.to_string().as_str(),
                     "https://cdn.winget.microsoft.com/cache" | "https://winget.azureedge.net/cache"
@@ -106,15 +106,11 @@ impl NativeProvider {
         let mut rows = self.find(&id.package_id, true, id.scope)?;
         ensure!(rows.len() == 1, "package_identity_ambiguous");
         let package = rows.remove(0);
-        ensure!(
-            package.Id()?.to_string() == id.package_id,
-            "package_identity_mismatch"
-        );
+        ensure!(package.Id()? == id.package_id, "package_identity_mismatch");
         let versions = package.AvailableVersions()?;
         let mut matching = Vec::new();
         for v in versions {
-            if v.Version()?.to_string() == id.version && v.PackageCatalogId()?.to_string() == SOURCE
-            {
+            if v.Version()? == id.version && v.PackageCatalogId()? == SOURCE {
                 matching.push(v);
             }
         }
@@ -269,14 +265,13 @@ impl Provider for NativeProvider {
         progress: &mut dyn FnMut(&str),
     ) -> Result<DispatchResult> {
         let (p, info, version) = self.exact(&plan.package.identity)?;
-        if plan.operation == Operation::Upgrade {
-            if let Installation::Present { identity, .. } = &plan.package.installation {
-                ensure!(
-                    info.CompareToVersion(&HSTRING::from(&identity.version))?
-                        == CompareResult::Greater,
-                    "target_not_newer"
-                );
-            }
+        if plan.operation == Operation::Upgrade
+            && let Installation::Present { identity, .. } = &plan.package.installation
+        {
+            ensure!(
+                info.CompareToVersion(&HSTRING::from(&identity.version))? == CompareResult::Greater,
+                "target_not_newer"
+            );
         }
         if cancel.is_cancelled() {
             return Ok(DispatchResult {

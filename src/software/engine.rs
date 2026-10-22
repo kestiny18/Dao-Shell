@@ -30,6 +30,48 @@ impl Engine {
     pub fn history(&self) -> Result<Vec<Value>> {
         self.journal.list()
     }
+    pub fn local_transition(
+        &mut self,
+        mut receipt: Value,
+        cancel: &Cancellation,
+        confirm: &mut dyn FnMut(&Value) -> Result<bool>,
+        dispatch: &mut dyn FnMut() -> Result<Value>,
+    ) -> Result<Value> {
+        ensure!(!self.used, "side_effect_already_attempted");
+        self.used = true;
+        ensure!(!self.unresolved()?, "maintenance_reconciliation_required");
+        let confirmation_started = std::time::Instant::now();
+        if cancel.is_cancelled()
+            || !confirm(&receipt)?
+            || cancel.is_cancelled()
+            || confirmation_started.elapsed() >= std::time::Duration::from_secs(90)
+        {
+            return Ok(json!({"status":"cancelled_before_dispatch"}));
+        }
+        receipt["maintenance_version"] = json!(1);
+        receipt["approval_origin"] = json!("local_confirmation");
+        receipt["created_at"] = json!(crate::core::now());
+        receipt["lifecycle"] = json!("dispatching");
+        self.journal.save(&receipt)?;
+        if cancel.is_cancelled()
+            || confirmation_started.elapsed() >= std::time::Duration::from_secs(90)
+        {
+            receipt["lifecycle"] = json!("cancelled_before_dispatch");
+            self.journal.save(&receipt)?;
+            return Ok(receipt);
+        }
+        match dispatch() {
+            Ok(evidence) => {
+                receipt["lifecycle"] = evidence["lifecycle"].clone();
+                receipt["evidence"] = evidence;
+            }
+            Err(_) => {
+                receipt["lifecycle"] = json!("unknown");
+                receipt["evidence"] = json!({"code":"provider_outcome_unknown"});
+            }
+        }
+        self.finish(receipt)
+    }
     pub fn unresolved(&self) -> Result<bool> {
         Ok(self.history()?.iter().any(|r| {
             matches!(
@@ -57,14 +99,28 @@ impl Engine {
         if cancel.is_cancelled() {
             return Ok(json!({"status":"cancelled_before_dispatch"}));
         }
+        let confirmation_started = std::time::Instant::now();
         let approval = confirm(plan)?;
-        if !approval.approved || cancel.is_cancelled() {
+        if !approval.approved
+            || cancel.is_cancelled()
+            || confirmation_started.elapsed() >= std::time::Duration::from_secs(90)
+        {
             return Ok(json!({"status":"cancelled_before_dispatch"}));
         }
         let current = provider.inspect(&plan.package.identity)?;
         plan.revalidate(&current, approval.agreement_digest.as_deref())?;
         let mut receipt = json!({"maintenance_version":1,"operation_id":plan.operation_id,"created_at":crate::core::now(),"operation":plan.operation,"package":plan.package.identity,"prestate":plan.package.installation,"lifecycle":"dispatching","evidence":{"code":"outcome_not_observed"}});
+        receipt["context"] = plan.context.clone();
+        receipt["agreement_digest"] = json!(approval.agreement_digest);
+        receipt["approval_origin"] = json!("local_confirmation");
         self.journal.save(&receipt)?; // Must succeed before any native dispatch.
+        if cancel.is_cancelled()
+            || confirmation_started.elapsed() >= std::time::Duration::from_secs(90)
+        {
+            receipt["lifecycle"] = json!("cancelled_before_dispatch");
+            self.journal.save(&receipt)?;
+            return Ok(receipt);
+        }
         let result = provider.dispatch(plan, cancel, progress);
         match result {
             Ok(result) => {
@@ -96,7 +152,13 @@ impl Engine {
                 receipt["evidence"] = json!({"code":"provider_outcome_unknown"});
             }
         }
-        self.journal.save(&receipt)?;
+        self.finish(receipt)
+    }
+    fn finish(&mut self, mut receipt: Value) -> Result<Value> {
+        if self.journal.save(&receipt).is_err() {
+            receipt["persistence_warning"] = json!(true);
+            receipt["lifecycle"] = json!("unknown");
+        }
         Ok(receipt)
     }
     /// A read-only check can resolve the gate only when the provider explicitly proves idle.
@@ -124,16 +186,68 @@ impl Engine {
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+    #[test]
+    fn local_refusal_and_cancel_never_dispatch_and_failed_final_save_recovers_unknown() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut engine = Engine::open(directory.path()).unwrap();
+        let cancel = Cancellation::default();
+        let mut calls = 0;
+        engine
+            .local_transition(
+                json!({"operation_id":"cancelled","operation":"fixture"}),
+                &cancel,
+                &mut |_| {
+                    cancel.cancel();
+                    Ok(true)
+                },
+                &mut || {
+                    calls += 1;
+                    Ok(json!({"lifecycle":"verified"}))
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 0);
+        assert!(engine.used());
+        assert!(engine.history().unwrap().is_empty());
+        cancel.reset();
+        engine.begin_turn();
+        let receipt = engine
+            .local_transition(
+                json!({"operation_id":"oversize","operation":"fixture"}),
+                &cancel,
+                &mut |_| Ok(true),
+                &mut || {
+                    calls += 1;
+                    Ok(json!({"lifecycle":"verified","large":"x".repeat(40000)}))
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(receipt["lifecycle"], "unknown");
+        assert_eq!(receipt["persistence_warning"], true);
+        drop(engine);
+        let engine = Engine::open(directory.path()).unwrap();
+        assert!(engine.unresolved().unwrap());
+        assert_eq!(engine.history().unwrap()[0]["lifecycle"], "unknown");
+    }
     struct Fake {
         package: Package,
         calls: usize,
         fail: bool,
+        checks: usize,
+        cancel_after_check: Option<Cancellation>,
     }
     impl Provider for Fake {
         fn search(&mut self, _: &str) -> Result<Vec<Package>> {
             Ok(vec![self.package.clone()])
         }
         fn inspect(&mut self, _: &Identity) -> Result<Package> {
+            self.checks += 1;
+            if self.checks == 2
+                && let Some(cancel) = &self.cancel_after_check
+            {
+                cancel.cancel();
+            }
             Ok(self.package.clone())
         }
         fn compare_versions(&self, _: &Identity, _: &str) -> Result<Ordering> {
@@ -185,6 +299,8 @@ mod tests {
                 package: p,
                 calls: 0,
                 fail: false,
+                checks: 0,
+                cancel_after_check: None,
             },
             plan,
         )
@@ -194,6 +310,18 @@ mod tests {
             approved: true,
             agreement_digest: None,
         })
+    }
+    #[test]
+    fn cancellation_during_final_identity_check_still_prevents_dispatch() {
+        let (_directory, mut engine, mut provider, plan) = setup();
+        let cancel = Cancellation::default();
+        provider.cancel_after_check = Some(cancel.clone());
+        let result = engine
+            .execute(&plan, &mut provider, &cancel, &mut approve, &mut |_| {})
+            .unwrap();
+        assert_eq!(provider.calls, 0);
+        assert_eq!(result["lifecycle"], "cancelled_before_dispatch");
+        assert!(!engine.unresolved().unwrap());
     }
     #[test]
     fn changed_call_id_cannot_dispatch_twice() {
@@ -270,5 +398,26 @@ mod tests {
             .is_err()
         );
         assert_eq!(p.calls, 0);
+        e.begin_turn();
+        let mut plan = plan;
+        plan.context =
+            json!({"execution_id":"fixture-execution","configuration_revision":"fixture-revision"});
+        let result = e
+            .execute(
+                &plan,
+                &mut p,
+                &Cancellation::default(),
+                &mut |_| {
+                    Ok(Approval {
+                        approved: true,
+                        agreement_digest: Some("license-hash".into()),
+                    })
+                },
+                &mut |_| {},
+            )
+            .unwrap();
+        assert_eq!(result["agreement_digest"], "license-hash");
+        assert_eq!(result["context"], plan.context);
+        assert_eq!(result["approval_origin"], "local_confirmation");
     }
 }

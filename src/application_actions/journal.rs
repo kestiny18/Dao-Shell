@@ -77,6 +77,10 @@ impl Journal {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(7);
         let mut n = 0;
         for r in self.list()? {
+            // The file is retained until an explicit restore; time must not erase its proof.
+            if r["operation"] == "startup_disable" && r["lifecycle"] == "verified" {
+                continue;
+            }
             if matches!(
                 r["lifecycle"].as_str(),
                 Some(
@@ -102,6 +106,16 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retention_proof_does_not_expire_before_startup_restore() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut journal = Journal::open(directory.path()).unwrap();
+        let old = "2020-01-01T00:00:00Z";
+        journal.save(&json!({"operation_id":"retained","created_at":old,"operation":"startup_disable","lifecycle":"verified","evidence":{"retained":"fixture.lnk"}})).unwrap();
+        journal.save(&json!({"operation_id":"ordinary","created_at":old,"operation":"fixture","lifecycle":"verified"})).unwrap();
+        assert_eq!(journal.prune(true).unwrap(), 1);
+        assert_eq!(journal.list().unwrap()[0]["operation_id"], "retained");
+    }
     #[test]
     fn interrupted_dispatch_recovers_unknown_never_replays_and_completed_cleanup_keeps_unknown() {
         let d = tempfile::tempdir().unwrap();

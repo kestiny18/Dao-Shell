@@ -11,6 +11,12 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub trait Interaction {
+    fn confirm_maintenance(&mut self, _: &Value) -> Result<crate::software::engine::Approval> {
+        Ok(crate::software::engine::Approval {
+            approved: false,
+            agreement_digest: None,
+        })
+    }
     fn confirm_app_action(&mut self, _: &Value) -> Result<bool> {
         Ok(false)
     }
@@ -21,6 +27,7 @@ pub trait Interaction {
 }
 
 pub struct Runtime {
+    pub maintenance: crate::software::store::Store,
     pub application_actions: crate::application_actions::Actions,
     pub computer: crate::observation::Store,
     pub scope: Scope,
@@ -44,6 +51,36 @@ impl Runtime {
             self.last_search = None;
         }
         self.cancel.check()?;
+        if self.computer.desktop && crate::software::store::is_tool(name) {
+            if crate::software::store::is_write(name) {
+                ensure!(!self.side_effects_blocked, "side_effect_already_attempted");
+                self.side_effects_blocked = true;
+                self.application_actions.block_turn();
+            }
+            let value = if self.computer.sharing != crate::config::ComputerQuerySharing::Enabled {
+                json!({"error":if self.computer.sharing==crate::config::ComputerQuerySharing::Ask{"permission_required"}else{"permission_denied"}})
+            } else {
+                match self.maintenance.call(name, arguments, &self.cancel, ui) {
+                    Ok(v) => v,
+                    Err(error) => json!({"error":crate::software::store::error_code(&error)}),
+                }
+            };
+            self.maintenance.delivered.push(value.clone());
+            ui.result("maintenance_result", &value);
+            return Ok(crate::software::store::projection(&value));
+        }
+        if self.computer.desktop
+            && matches!(
+                name,
+                "file_open" | "file_move_batch" | "app_launch" | "process_terminate"
+            )
+        {
+            ensure!(
+                !self.maintenance.unresolved(),
+                "maintenance_reconciliation_required"
+            );
+            self.maintenance.used = true;
+        }
         if self.side_effects_blocked && matches!(name, "file_open" | "file_move_batch") {
             bail!("本轮的打开/移动已取消或有未知结果，需用户下一条指令；不能重复请求确认");
         }
@@ -224,6 +261,11 @@ impl Runtime {
     ) -> Result<Value> {
         self.cancel.check()?;
         ensure!(
+            !self.maintenance.unresolved(),
+            "maintenance_reconciliation_required"
+        );
+        self.maintenance.used = true;
+        ensure!(
             !self.side_effects_blocked,
             "本轮打开已取消或结果未知，请重新选择"
         );
@@ -294,6 +336,7 @@ mod open_tests {
             side_effects_blocked: false,
             computer: Default::default(),
             application_actions: Default::default(),
+            maintenance: Default::default(),
         };
         let id = runtime.objects.insert(&path).unwrap().id;
         let mut ui = Ui::default();

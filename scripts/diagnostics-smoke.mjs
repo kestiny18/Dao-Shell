@@ -18,6 +18,13 @@ async function check(label,expression){assert.equal(await client.evaluate(expres
 async function close(){if(client){await client.evaluate("setTimeout(()=>api.invoke('finish_close'),100);true");client.socket.close();client=null;await delay(1000);}}
 try{
  await launch();
+ if(process.argv.includes('--statistics-only')){
+  await client.evaluate(`globalThis.observationTask=run('computer',JSON.stringify({tool:'resource_observe',arguments:{domains:['cpu','memory'],duration_s:30,interval_ms:1000}}));true`);
+  for(let i=0;i<100;i++){if(await client.evaluate('Boolean(session()&&state(session().id).diagnosticProgress?.points.length>=3)'))break;await delay(100);}
+  await check('final native stopped sequence weights the first complete CPU interval',`(async()=>{await stopRequest();const r=await observationTask;const v=r.observations[0],points=v.data.series,s=v.data.summary['cpu.percent'];const span=points.at(-1).elapsed_ms-points[0].elapsed_ms;return v.status==='stopped'&&points.length>=3&&points[0].values['cpu.percent']===null&&Math.abs(s.observed_weight_ms-span)<1&&typeof s.time_weighted_mean==='number';})()`);
+  evidence.observations=await client.evaluate(`state(session().id).observations.filter(v=>v.kind==='resource_observe').map(v=>({status:v.status,sample_window:v.sample_window,series:v.data.series,summary:v.data.summary}))`);
+  await close();evidence.result='PASS';
+ }else{
  await check('forged model endpoint cannot send network request',`(async()=>{const r=await run('say','forged-probe');return !r.error&&r.observations[0]?.error==='endpoint_confirmation_required';})()`);assert.equal(networkRequests,0);
  await client.evaluate(`globalThis.observationTask=run('computer',JSON.stringify({tool:'resource_observe',arguments:{domains:['cpu','memory'],duration_s:30,interval_ms:1000}}));true`);
  for(let i=0;i<80;i++){if(await client.evaluate('Boolean(session()&&state(session().id).diagnosticProgress?.points.length>=3)'))break;await delay(100);}
@@ -34,5 +41,6 @@ try{
  await check('workspace excludes series, endpoint addresses and startup commands',`(async()=>{await persist();const text=JSON.stringify(workspace);return !text.includes('local_identity')&&!text.includes('127.0.0.1')&&!text.includes('endpoint_ref')&&!text.includes('SECRET_COMMAND');})()`);
  await check('sharing disabled preserves local series but blocks model diagnostics',`(async()=>{await saveComputerSharing('disabled');const r=await run('say','observe60');return !r.error&&r.observations[0].error==='permission_denied';})()`);
  await check('all diagnostic translations exist',"missingMessageKeys.size===0");await close();await launch();await check('restart restores summaries without live series or endpoint refs',"workspace.sessions.every(s=>!state(s.id).diagnosticProgress&&!state(s.id).diagnosticEndpoint&&!(state(s.id).observations||[]).length)");await close();evidence.result='PASS';
+ }
 }catch(error){evidence.result='FAIL';evidence.errors.push(String(error));console.error(error);process.exitCode=1;}
 finally{try{await close();}catch{}server.close();target.close();fs.writeFileSync(path.join(root,'evidence.json'),JSON.stringify({...evidence,model_requests:requests,application_http_requests:networkRequests,completed_at:new Date().toISOString()},null,2));}

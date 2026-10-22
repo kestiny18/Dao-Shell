@@ -333,15 +333,25 @@ pub fn summarize(points: &[Value], defs: &Value, interval_ms: u64) -> Value {
         let mut weighted = 0.;
         let mut weight = 0.;
         let mut high = 0.;
-        let mut previous = None;
+        let mut previous: Option<(f64, bool, bool)> = None;
+        let interval_metric = def["unit"] == "bytes/second"
+            || def["semantics"]
+                .as_str()
+                .is_some_and(|s| s.contains("interval average"))
+            || (key.starts_with("gpu.") && def["unit"] == "percent");
         for p in points {
             let t = p["elapsed_ms"].as_f64().unwrap_or(0.);
             let v = p["values"][key].as_f64().filter(|v| v.is_finite());
             if let Some(v) = v {
                 values.push((t, v));
-                if let Some(prev) = previous {
+                if let Some((prev, previous_valid, previous_on_time)) = previous {
                     let dt = t - prev;
-                    if dt > 0. && dt <= interval_ms as f64 * 1.75 && p["unknown_reason"].is_null() {
+                    if dt > 0.
+                        && dt <= interval_ms as f64 * 1.75
+                        && p["unknown_reason"].is_null()
+                        && previous_on_time
+                        && (interval_metric || previous_valid)
+                    {
                         weighted += v * dt;
                         weight += dt;
                         if def["high_threshold"]
@@ -353,7 +363,7 @@ pub fn summarize(points: &[Value], defs: &Value, interval_ms: u64) -> Value {
                     }
                 }
             }
-            previous = if v.is_some() { Some(t) } else { None };
+            previous = Some((t, v.is_some(), p["unknown_reason"].is_null()));
         }
         let peak = values.iter().max_by(|a, b| a.1.total_cmp(&b.1));
         out[key] = json!({"valid_points":values.len(),"missing_points":points.len()-values.len(),"min":values.iter().map(|v|v.1).reduce(f64::min),"max":peak.map(|p|p.1),"peak_elapsed_ms":peak.map(|p|p.0),"time_weighted_mean":if weight>0.{Some(weighted/weight)}else{None},"observed_weight_ms":weight,"high_threshold":def["high_threshold"],"high_duration_ms":high,"trend_status":if values.len()>=2&&weight>0.{"sufficient_samples"}else{"insufficient_samples"}});
@@ -585,6 +595,22 @@ mod tests {
             )
             .is_err()
         );
+    }
+    #[test]
+    fn first_valid_interval_has_weight_but_point_values_do_not_fill_unknown_gaps() {
+        let points = vec![
+            json!({"elapsed_ms":0,"values":{}}),
+            json!({"elapsed_ms":1000,"values":{"rate":80,"memory":80}}),
+        ];
+        let summary = summarize(
+            &points,
+            &json!({"rate":{"unit":"bytes/second"},"memory":{"unit":"bytes"}}),
+            1000,
+        );
+        assert_eq!(summary["rate"]["observed_weight_ms"], 1000.);
+        assert_eq!(summary["rate"]["time_weighted_mean"], 80.);
+        assert_eq!(summary["memory"]["observed_weight_ms"], 0.);
+        assert!(summary["memory"]["time_weighted_mean"].is_null());
     }
     #[test]
     fn projection_never_shares_native_identity() {

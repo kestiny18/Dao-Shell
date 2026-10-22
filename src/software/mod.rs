@@ -10,4 +10,7 @@ pub fn probe() -> serde_json::Value {
     serde_json::json!({"available":false,"code":"unsupported_platform"})
 }
 pub mod contract;
+pub mod engine;
 pub mod startup;
+#[cfg(windows)]
+pub mod typed;

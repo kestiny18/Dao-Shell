@@ -79,7 +79,9 @@ impl Journal {
         for r in self.list()? {
             if matches!(
                 r["lifecycle"].as_str(),
-                Some("unknown" | "dispatching" | "dispatched")
+                Some(
+                    "unknown" | "dispatching" | "dispatched" | "awaiting_user" | "awaiting_reboot"
+                )
             ) {
                 continue;
             }

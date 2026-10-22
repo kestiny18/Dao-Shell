@@ -139,7 +139,7 @@ pub trait Provider {
         cancel: &crate::core::Cancellation,
         progress: &mut dyn FnMut(&str),
     ) -> Result<DispatchResult>;
-    fn compare_versions(&self, installed: &str, target: &str) -> Result<std::cmp::Ordering>;
+    fn compare_versions(&self, identity: &Identity, installed: &str) -> Result<std::cmp::Ordering>;
 }
 #[cfg(test)]
 mod tests {

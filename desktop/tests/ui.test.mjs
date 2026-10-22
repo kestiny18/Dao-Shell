@@ -29,6 +29,7 @@ async function fixture(options = {}) {
     if (command === 'choose_directory') { if(options.directoryError) throw Error('picker unavailable'); return options.directory ?? null; }
     if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return {...clone(current),effective_language:current.config.ui_language==='en'?'en':current.config.ui_language==='zh-CN'?'zh-CN':options.systemLanguage || 'zh-CN'}; }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
+    if (command === 'confirm_open' && options.confirmApplication) return options.confirmApplication(args);
     if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
     if (command === 'process_action' && options.processAction) return options.processAction(args);
     if (command === 'computer_profile') { if (options.profile) return options.profile(); return {brand:'Fixture',model:null,os:'Windows fixture',cpus:['CPU A'],memory_bytes:8589934592,graphics:['GPU A','GPU B'],volumes:[1073741824,2147483648],observed_at:'fixture time',host:'SECRET_HOST',serial:'SECRET_SERIAL',mount:'SECRET_PATH'}; }
@@ -47,7 +48,7 @@ async function fixture(options = {}) {
     if (command === 'cancel') { if (!options.deferCancel) pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['i18n.js','app.js','computer-query.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['i18n.js','app.js','computer-query.js','application-actions.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -128,6 +129,30 @@ test('overview explanation cannot bypass disabled sharing and local tool control
 test('cancelled or invalid computer query errors do not offer an authorization action',async(t)=>{
   const f=await fixture({perform:async()=>({message:'cancelled',error:true,items:[],observations:[{error:'cancelled',status:'error'}]})});t.after(()=>f.dom.window.close());
   f.$('local-computer-query').click();await f.tick();assert.equal(f.$('computer-observations').querySelectorAll('button').length,0);
+});
+
+test('application confirmation stays with owner and never persists native plan or approval token',async(t)=>{
+  let finish;
+  const plan={operation_id:'operation-one',kind:'terminate',name:'<img src=x>',path:'C:\\fixture\\Owned.exe',pid:123,created:'133700000000001',risk:'unsaved_data_loss'};
+  const f=await fixture({confirmApplication:async()=>{},perform:async(args,emit)=>{emit({kind:'action_prepared',request_id:'local-token',plan});return new Promise(resolve=>{finish=resolve;});}});t.after(()=>f.dom.window.close());
+  const pending=f.w.run('process-terminate',JSON.stringify({target_ref:'exact-owned'}));await f.tick();const owner=f.w.eval('session().id');
+  assert.match(f.$('application-action-panel').textContent,/未保存内容/);assert.match(f.$('application-action-panel').textContent,/PID 123/);assert.equal(f.$('application-action-panel').querySelector('img'),null);
+  await f.w.newSession();await f.tick();assert.equal(f.$('application-action-panel').querySelector('section'),null);
+  await f.w.answerApplicationAction(true);assert.equal(f.calls.filter(c=>c.command==='confirm_open').length,0);
+  f.w.selectTab(owner);await f.w.answerApplicationAction(false);assert.equal(f.calls.filter(c=>c.command==='confirm_open').length,1);
+  const call=f.calls.filter(c=>c.command==='confirm_open')[0];assert.equal(call.args.requestId,'local-token');assert.equal(call.args.approved,false);
+  finish({message:'Rejected',error:false,items:[],action_receipts:[]});await pending;await f.tick();
+  const persisted=JSON.stringify(f.saved());assert(!persisted.includes('local-token'));assert(!persisted.includes('Owned.exe'));assert(!persisted.includes('133700000000001'));
+});
+
+test('action receipt event and final deduplicate; reconcile is read-only and unsupported close offers no force button',async(t)=>{
+  const receipt={operation_id:'op-one',kind:'launch',name:'Owned fixture',created_at:'2026-10-22T10:00:00Z',observed_at:'2026-10-22T10:00:01Z',lifecycle:'unknown',evidence:{process_created:true,process_state:'unknown'}};
+  const f=await fixture({perform:async(args,emit)=>{if(args.kind==='app-targets'){const v={status:'unavailable',reason:'close_identity_not_atomic',items:[]};emit({kind:'result',capability:'app_targets',value:v});return {message:'Unavailable',error:false,items:[]};}emit({kind:'result',capability:'app_action_receipt',value:receipt});return {message:'Receipt',error:false,items:[],action_receipts:[receipt]};}});t.after(()=>f.dom.window.close());
+  await f.w.run('app-launch',JSON.stringify({target_ref:'fixture'}));await f.tick();
+  assert.equal(f.saved().sessions[0].messages.filter(m=>m.role==='receipt').length,1);assert.match(f.$('application-action-panel').textContent,/结果未知/);
+  [...f.$('application-action-panel').querySelectorAll('button')].find(b=>b.textContent.includes('核对原目标')).click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').at(-1).args.kind,'reconcile-action');
+  await f.w.run('app-targets',JSON.stringify({kind:'close',query:'fixture'}));await f.tick();
+  assert.match(f.$('application-action-panel').textContent,/正常关闭暂不可用/);assert(![...f.$('application-action-panel').querySelectorAll('button')].some(b=>b.textContent.includes('强制结束')));
 });
 
 test('overview shows every application, stable running priority, estimates and unknowns in both views', async (t) => {

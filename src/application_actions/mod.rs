@@ -35,6 +35,7 @@ pub struct Actions {
     pages: HashMap<String, (String, Vec<String>, usize)>,
     pub directory: Option<PathBuf>,
     pub excluded_environment: Vec<String>,
+    pub context: Value,
     used: bool,
     last: Option<(String, String, Value)>,
     pub delivered: Vec<Value>,
@@ -262,10 +263,11 @@ impl Actions {
     ) -> Result<Value> {
         let r: Reference =
             serde_json::from_value(args).map_err(|_| anyhow::anyhow!("invalid_arguments"))?;
-        if let Some((name, id, value)) = &self.last {
-            if name == tool && id == &r.target_ref {
-                return Ok(value.clone());
-            }
+        if let Some((name, id, value)) = &self.last
+            && name == tool
+            && id == &r.target_ref
+        {
+            return Ok(value.clone());
         }
         ensure!(!self.used, "turn_action_limit");
         self.used = true;
@@ -293,9 +295,7 @@ impl Actions {
             !journal
                 .list()?
                 .iter()
-                .any(|old| old["lifecycle"] == "unknown"
-                    && old.get("checked_at").is_none()
-                    && old["name"] == e.name),
+                .any(|old| old["lifecycle"] == "unknown" && old.get("checked_at").is_none()),
             "needs_reconciliation"
         );
         let id = uuid::Uuid::new_v4().to_string();
@@ -313,6 +313,13 @@ impl Actions {
                 preview["path"] = json!(p.image);
             }
         }
+        for key in ["session_id", "execution_id", "configuration_revision"] {
+            if let Some(value) = self.context.get(key) {
+                preview[key] = value.clone();
+            }
+        }
+        preview["deadline"] =
+            json!((chrono::Utc::now() + chrono::Duration::seconds(90)).to_rfc3339());
         let start = Instant::now();
         let approved = ui.confirm_app_action(&preview)?;
         let mut receipt = json!({"operation_id":id,"kind":expected,"name":e.name,"created_at":preview["created_at"],"observed_at":now(),"lifecycle":"rejected","evidence":{"code":"not_dispatched"}});
@@ -320,6 +327,10 @@ impl Actions {
             verify(&e.target)?;
             cancel.check()?;
             receipt["lifecycle"] = json!("dispatching");
+            receipt["evidence"] = json!({"code":"dispatch_outcome_unobserved"});
+            if let Target::Process(process) = &e.target {
+                receipt["evidence"]["process"] = serde_json::to_value(process)?;
+            }
             journal.save(&receipt)?;
             let outcome = match &e.target {
                 Target::Unsupported(_) => Err(anyhow::anyhow!("launch_unavailable")),

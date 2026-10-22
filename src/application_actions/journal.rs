@@ -104,11 +104,16 @@ mod tests {
     fn interrupted_dispatch_recovers_unknown_never_replays_and_completed_cleanup_keeps_unknown() {
         let d = tempfile::tempdir().unwrap();
         let mut j = Journal::open(d.path()).unwrap();
-        j.save(&json!({"operation_id":"one","created_at":crate::core::now(),"lifecycle":"dispatching","name":"fixture"})).unwrap();
+        j.save(&json!({"operation_id":"one","created_at":crate::core::now(),"lifecycle":"dispatching","name":"fixture","evidence":{"code":"dispatch_outcome_unobserved","process_created":true}})).unwrap();
         assert!(Journal::open(d.path()).is_err());
         drop(j);
         let mut j = Journal::open(d.path()).unwrap();
         assert_eq!(j.list().unwrap()[0]["lifecycle"], "unknown");
+        assert_eq!(j.list().unwrap()[0]["evidence"]["process_created"], true);
+        assert_eq!(
+            j.list().unwrap()[0]["evidence"]["code"],
+            "dispatch_outcome_unobserved"
+        );
         assert_eq!(j.prune(true).unwrap(), 0);
     }
 }

@@ -108,7 +108,33 @@ pub fn discover() -> Result<HashMap<String, Vec<Option<Target>>>, String> {
     let _apartment = Apartment;
     let mut found = HashMap::<String, Vec<Option<Target>>>::new();
     let mut dirs = Vec::new();
-    for folder in [&FOLDERID_Programs, &FOLDERID_CommonPrograms] {
+    #[cfg(debug_assertions)]
+    let fixture = match std::env::var_os("DAO_SHELL_ACTION_FIXTURE_ROOT") {
+        Some(root) => Some(fixture_root(
+            Path::new(&root),
+            std::env::var_os("DAO_SHELL_DESKTOP_CONFIG")
+                .as_deref()
+                .map(Path::new),
+        )?),
+        None => None,
+    };
+    #[cfg(debug_assertions)]
+    if let Some(root) = &fixture {
+        let text = root.to_string_lossy();
+        dirs.push((
+            PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text)).join("menu"),
+            0,
+        ));
+    }
+    #[cfg(debug_assertions)]
+    let ordinary = fixture.is_none();
+    #[cfg(not(debug_assertions))]
+    let ordinary = true;
+    for folder in if ordinary {
+        vec![&FOLDERID_Programs, &FOLDERID_CommonPrograms]
+    } else {
+        vec![]
+    } {
         if let Ok(raw) = unsafe { SHGetKnownFolderPath(folder, KF_FLAG_DEFAULT, None) } {
             let path = unsafe { raw.to_string() };
             unsafe { CoTaskMemFree(Some(raw.0.cast())) };
@@ -168,10 +194,73 @@ pub fn discover() -> Result<HashMap<String, Vec<Option<Target>>>, String> {
                 .to_lowercase();
             // Count unsupported duplicates too: ambiguity must not select the other entry.
             let target = parse_link(&path);
+            #[cfg(debug_assertions)]
+            let target = target.filter(|t| {
+                fixture.as_ref().is_none_or(|root| {
+                    t.exe
+                        .canonicalize()
+                        .ok()
+                        .is_some_and(|exe| exe.starts_with(root))
+                })
+            });
             found.entry(key).or_default().push(target);
         }
     }
     Ok(found)
+}
+
+/// Explicit debug fixture only. Invalid overrides fail closed, never fall back to real menus.
+#[cfg(all(windows, debug_assertions))]
+fn fixture_root(root: &Path, config: Option<&Path>) -> Result<PathBuf, String> {
+    let config = config.ok_or("invalid_fixture")?;
+    let _root = platform::pin_directory(root).map_err(|_| "invalid_fixture")?;
+    let root = root.canonicalize().map_err(|_| "invalid_fixture")?;
+    let config_meta = std::fs::symlink_metadata(config).map_err(|_| "invalid_fixture")?;
+    if !config_meta.is_file()
+        || platform::is_link(&config_meta)
+        || config
+            .canonicalize()
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+            .as_ref()
+            != Some(&root)
+    {
+        return Err("invalid_fixture".into());
+    }
+    let marker = root.join("phase2-owned-fixture.marker");
+    let meta = std::fs::symlink_metadata(&marker).map_err(|_| "invalid_fixture")?;
+    if !meta.is_file()
+        || platform::is_link(&meta)
+        || meta.len() != b"DaoShellPhase2OwnedFixture".len() as u64
+        || std::fs::read(&marker).ok().as_deref() != Some(b"DaoShellPhase2OwnedFixture")
+    {
+        return Err("invalid_fixture".into());
+    }
+    let _menu = platform::pin_directory(&root.join("menu")).map_err(|_| "invalid_fixture")?;
+    Ok(root)
+}
+
+#[cfg(all(test, windows, debug_assertions))]
+mod fixture_tests {
+    use super::*;
+    #[test]
+    fn explicit_config_marker_and_non_reparse_menu_are_required() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.json");
+        std::fs::write(&config, b"{}").unwrap();
+        assert!(fixture_root(root.path(), None).is_err());
+        assert!(fixture_root(root.path(), Some(&config)).is_err());
+        std::fs::write(
+            root.path().join("phase2-owned-fixture.marker"),
+            b"DaoShellPhase2OwnedFixture",
+        )
+        .unwrap();
+        assert!(fixture_root(root.path(), Some(&config)).is_err());
+        std::fs::create_dir(root.path().join("menu")).unwrap();
+        assert!(fixture_root(root.path(), Some(&config)).is_ok());
+        let other = tempfile::tempdir().unwrap();
+        assert!(fixture_root(root.path(), Some(&other.path().join("config.json"))).is_err());
+    }
 }
 #[cfg(windows)]
 fn fixed_drive(path: &Path) -> bool {

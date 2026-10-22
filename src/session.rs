@@ -106,6 +106,9 @@ impl FileSession {
         })
     }
 
+    pub fn set_action_context(&mut self, session_id: &str, execution_id: &str, revision: &str) {
+        self.runtime.application_actions.context = json!({"session_id":session_id,"execution_id":execution_id,"configuration_revision":revision});
+    }
     pub fn set_action_directory(&mut self, directory: std::path::PathBuf, config: &Config) {
         self.runtime.application_actions.directory = Some(directory);
         self.runtime.application_actions.excluded_environment = config
@@ -197,7 +200,7 @@ impl FileSession {
             }
             Action::Application { tool, arguments } => {
                 ensure!(crate::application_actions::is_tool(&tool), "unsupported");
-                let _value = if tool == "app_targets" {
+                let value = if tool == "app_targets" {
                     let value = self
                         .runtime
                         .application_actions
@@ -212,18 +215,22 @@ impl FileSession {
                         ui,
                     )?
                 };
-                Ok(if tool == "app_targets" {
-                    self.language
-                        .choose("请选择已核验的具体目标。", "Select a verified target.")
-                        .into()
-                } else {
-                    self.language
+                Ok(
+                    if tool == "app_targets" && value["reason"] == "close_identity_not_atomic" {
+                        self.language.choose("正常关闭暂不可用；未发送消息，也不会改为强制结束。","Normal close is unavailable. No message was sent and force termination is not substituted.").into()
+                    } else if tool == "app_targets" {
+                        self.language
+                            .choose("请选择已核验的具体目标。", "Select a verified target.")
+                            .into()
+                    } else {
+                        self.language
                         .choose(
                             "请查看本地动作回执；派发和退出证据分别列出。",
                             "See the local action receipt for separate dispatch and exit evidence.",
                         )
                         .into()
-                })
+                    },
+                )
             }
             Action::ActionReceipts => {
                 let value = self.runtime.application_actions.receipts()?;

@@ -15,7 +15,7 @@ let saveLoop = null;
 let pendingSave = null;
 const pageScroll = new Map();
 function session(id = workspace.active) { return workspace.sessions.find(s => s.id === id); }
-function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false,observations:[]}); return runtime.get(id); }
+function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false,observations:[],actionTargets:null,actionReceipts:[],appConfirmation:null}); return runtime.get(id); }
 function pathText(path) { return String(path).replace(/^\\\\\?\\/, ''); }
 function nameOf(path) { return pathText(path).split(/[\\/]/).pop() || pathText(path); }
 function persistenceNotice(text) { $('workspace-status').textContent = text; $('workspace-status').hidden = !text; }
@@ -155,6 +155,7 @@ function renderCurrent() {
   $('welcome').hidden = Boolean(s?.messages.length);
   $('context-notice').hidden = !st?.contextLost;
   candidates(st?.items || []);
+  if(typeof renderApplicationActions==='function') renderApplicationActions(st);
   if (typeof renderObservations === "function") renderObservations(st?.observations || []);
   $('input').value = s?.draft ?? (currentPage === 'home' ? workspace.home_draft : '');
   renderedTab = workspace.active;
@@ -189,9 +190,9 @@ function message(text, role = 'assistant', error = false, id = workspace.active)
   if (workspace.active === id) { $('welcome').hidden = true; renderMessage(s.messages.at(-1)); }
   saveSoon();
 }
-function closeConfirmation(id = workspace.active) { if (runtime.has(id)) state(id).confirmation = null; if (workspace.active === id) $('confirmation').hidden = true; }
+function closeConfirmation(id = workspace.active) { if (runtime.has(id)) {state(id).confirmation = null;state(id).appConfirmation=null;} if (workspace.active === id) $('confirmation').hidden = true; }
 function invalidateContexts() {
-  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.observations = []; st.confirmation = null; st.contextLost = true; }
+  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.observations = []; st.actionTargets=null;st.actionReceipts=[];st.appConfirmation=null;st.confirmation = null; st.contextLost = true; }
   renderCurrent();
 }
 function applySearchReceipt(value,request) {
@@ -219,9 +220,13 @@ function onEvent(event, request) {
   if (event.kind === 'progress') st.activity = localBuiltin(event.text);
   if (event.kind === 'context_reset') {
     for (const item of event.configuration_changed ? workspace.sessions : [session(request.sessionId)]) {
-      const previous = state(item.id); previous.items = []; previous.observations = []; previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
+      const previous = state(item.id); previous.items = []; previous.observations = []; previous.actionTargets=null;previous.appConfirmation=null;previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
     }
   }
+  if(event.kind==='action_prepared' && !request.stopping) st.appConfirmation={...event,executionId:request.id};
+  if(event.kind==='confirmation_closed' && st.appConfirmation?.request_id===event.request_id) st.appConfirmation=null;
+  if(event.kind==='result' && ['app_targets','app_launch','app_close','process_terminate'].includes(event.capability) && ['permission_required','permission_denied'].includes(event.value?.error)) applyObservation(event.value,request);
+  if(event.kind==='result' && ['app_targets','app_action_receipt','app_action_history'].includes(event.capability)) applyApplicationResult(event.capability,event.value,request);
   if (event.kind === 'result' && ['resource_snapshot','process_list','network_snapshot','app_list','computer_profile'].includes(event.capability)) applyObservation(event.value,request);
   if (event.kind === 'result' && event.capability === 'file_search') applySearchReceipt(event.value,request);
   if (event.kind === 'result' && event.capability === 'file_open') message(localBuiltin(event.value.message) || t('app.open_request_processed'),'receipt',false,request.sessionId);
@@ -255,6 +260,8 @@ async function run(kind,input = '') {
     try {
       const reply = await api.invoke('perform',{sessionId:id,requestId:request.id,kind,input,onEvent:channel});
       if (activeRequest !== request || !session(id)) return;
+      for(const value of reply.action_targets || []) applyApplicationResult('app_targets',value,request);
+      for(const value of reply.action_receipts || []) applyApplicationResult('app_action_receipt',value,request);
       for (const value of reply.observations || []) applyObservation(value,request);
       if (reply.search_receipt) applySearchReceipt(reply.search_receipt,request);
       if (!['open','open-selected'].includes(kind) || reply.error) message(reply.error ? errorText(reply.message) : reply.message,'assistant',reply.error,id);

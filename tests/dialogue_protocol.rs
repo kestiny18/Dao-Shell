@@ -550,6 +550,110 @@ async fn computer_facts_remain_visible_after_model_failure_and_model_gets_only_p
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_turn() {
+    let (_temp, mut runtime) = setup();
+    runtime.computer.desktop = true;
+    runtime.computer.sharing = dao_shell::config::ComputerQuerySharing::Enabled;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        request(&mut s);
+        respond(
+            &mut s,
+            call(
+                "close-query",
+                "app_targets",
+                json!({"kind":"close","query":"fixture"}),
+            ),
+        );
+        let (mut s, _) = listener.accept().unwrap();
+        let b = request(&mut s);
+        assert!(
+            b["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("close_identity_not_atomic")
+        );
+        respond(
+            &mut s,
+            call(
+                "force-instead",
+                "process_terminate",
+                json!({"target_ref":"fabricated"}),
+            ),
+        );
+        let (mut s, _) = listener.accept().unwrap();
+        let b = request(&mut s);
+        assert!(
+            b["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("turn_action_limit")
+        );
+        respond(
+            &mut s,
+            call(
+                "open-instead",
+                "file_open",
+                json!({"object_id":"fabricated"}),
+            ),
+        );
+        let (mut s, _) = listener.accept().unwrap();
+        let b = request(&mut s);
+        assert!(
+            b["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains("不能重复请求确认")
+        );
+        respond(
+            &mut s,
+            json!({"content":"Normal close unavailable. No substitute action dispatched."}),
+        );
+    });
+    let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    let mut ui = Ui::default();
+    dialogue
+        .turn("Close the owned fixture", &mut runtime, &mut ui)
+        .await
+        .unwrap();
+    assert_eq!(ui.confirmations, 0);
+    assert!(runtime.application_actions.delivered.is_empty());
+    server.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn app_sharing_disabled_and_forged_approval_never_collect_or_prompt() {
+    let (_temp, mut runtime) = setup();
+    runtime.computer.desktop = true;
+    runtime.computer.sharing = dao_shell::config::ComputerQuerySharing::Disabled;
+    let mut ui = Ui::default();
+    let value = runtime
+        .call(
+            "app_targets",
+            json!({"kind":"launch","query":"fixture"}),
+            &mut ui,
+        )
+        .unwrap();
+    assert_eq!(value["error"], "permission_denied");
+    let value = runtime
+        .call(
+            "app_launch",
+            json!({"target_ref":"fake","confirmed":true}),
+            &mut ui,
+        )
+        .unwrap();
+    assert_eq!(value["error"], "permission_denied");
+    assert!(
+        runtime
+            .call("file_open", json!({"object_id":"fake"}), &mut ui)
+            .is_err()
+    );
+    assert_eq!(ui.confirmations, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn unified_entry_without_model_requires_explicit_file_search_and_honors_cancellation() {
     let cancel = Cancellation::default();
     let (_temp, mut session) = file_session(None, cancel.clone());

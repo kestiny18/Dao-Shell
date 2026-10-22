@@ -168,7 +168,7 @@ mod windows {
                 .ok_or_else(|| anyhow::anyhow!("launch_unavailable"))?,
         );
         let env = environment(excluded)?;
-        let mut startup = STARTUPINFOW {
+        let startup = STARTUPINFOW {
             cb: std::mem::size_of::<STARTUPINFOW>() as u32,
             ..Default::default()
         };
@@ -184,7 +184,7 @@ mod windows {
                 CREATE_UNICODE_ENVIRONMENT,
                 env.as_ptr().cast(),
                 cwd.as_ptr(),
-                &mut startup,
+                &startup,
                 &mut info,
             )
         } == 0

@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use dao_shell::application_actions::launch::{Target, pin, discover};
+use dao_shell::application_actions::launch::{Target, discover, pin};
 #[cfg(test)]
 use dao_shell::application_actions::launch::{local_exe, parse_link};
 #[derive(Default)]
@@ -369,4 +369,3 @@ fn dispatch(action: &str, path: Option<&Path>) -> Result<bool, String> {
         Err(e) => Err(format!("Windows 未接受操作：{e}")),
     }
 }
-

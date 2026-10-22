@@ -1,5 +1,40 @@
 /* Only explicit built-in message keys are translated. User data is never scanned. */
 const messages = {
+  "actions.local": {"zh": "应用操作", "en": "Application actions"},
+  "actions.launch": {"zh": "启动应用", "en": "Launch application"},
+  "actions.close": {"zh": "正常关闭（暂不可用）", "en": "Normal close (unavailable)"},
+  "actions.terminate": {"zh": "强制结束具体实例", "en": "Force end one instance"},
+  "actions.query": {"zh": "程序名称包含", "en": "Program name contains"},
+  "actions.find": {"zh": "查找操作目标", "en": "Find action targets"},
+  "actions.history": {"zh": "操作回执", "en": "Action receipts"},
+  "actions.clear": {"zh": "清理完成回执", "en": "Clear completed receipts"},
+  "actions.select": {"zh": "选择此具体目标", "en": "Select this exact target"},
+  "actions.confirm_launch": {"zh": "启动", "en": "Launch"},
+  "actions.confirm_terminate": {"zh": "强制结束此实例", "en": "Force end this instance"},
+  "actions.cancel": {"zh": "取消", "en": "Cancel"},
+  "actions.risk_launch": {"zh": "普通权限，无自定义参数。工作目录为已核验程序所在目录。创建进程不代表窗口出现或应用已可用；可能产生新实例或激活已有实例。", "en": "Ordinary privilege, no custom arguments. Working directory is the verified executable directory. Process creation does not prove a visible/ready window; this may create another instance or activate an existing one."},
+  "actions.risk_terminate": {"zh": "可能丢失未保存内容！仅结束此确认中的精确实例，不结束同名新实例或子进程。", "en": "Unsaved data may be lost. Only this exact confirmed instance is affected, never a new same-name instance or its children."},
+  "actions.reconcile": {"zh": "核对原目标（不重放）", "en": "Check original target (no replay)"},
+  "actions.unavailable": {"zh": "正常关闭暂不可用：无法原子约束已确认窗口身份。没有发送关闭消息，也不会自动改为强制结束。", "en": "Normal close is unavailable: confirmed window identity cannot be atomically bound to dispatch. No close message was sent; force termination is never substituted."},
+  "actions.no_targets": {"zh": "没有受支持的操作目标；清单不完整，不能据此断言应用不存在。", "en": "No supported action targets. Discovery is scoped; this does not prove the application is absent."},
+  "actions.rejected": {"zh": "未派发：已拒绝、取消或确认失效。", "en": "Not dispatched: rejected, cancelled or confirmation invalidated."},
+  "actions.completed": {"zh": "已记录派发/退出证据；不等于应用窗口已准备就绪。", "en": "Dispatch/exit evidence recorded; this does not imply a ready application window."},
+  "actions.unknown": {"zh": "结果未知，不能自动重放。请核对原目标。", "en": "Outcome unknown. Do not replay automatically; check the original target."},
+  "actions.failed_before_dispatch": {"zh": "未完成派发，未报告成功。", "en": "Dispatch did not complete; success is not reported."},
+  "actions.expired": {"zh": "确认已过期，未派发。", "en": "Confirmation expired; not dispatched."},
+  "actions.created": {"zh": "已创建进程", "en": "Process created"},
+  "actions.exited": {"zh": "已观察到原实例退出", "en": "Original instance exit observed"},
+  "actions.running": {"zh": "原实例仍在运行", "en": "Original instance still running"},
+  "actions.process_unknown": {"zh": "原实例状态未知", "en": "Original instance state unknown"},
+  "actions.warning": {"zh": "回执写回失败，结果保留未知；不要重放。", "en": "Receipt write failed; outcome remains unknown. Do not replay."},
+  "actions.target_unavailable": {"zh": "入口不唯一、不受支持或身份不可核验；不可操作。", "en": "Entry is ambiguous/unsupported or identity is unverifiable; action unavailable."},
+  "actions.path": {"zh": "实际程序", "en": "Executable"},
+  "actions.entry": {"zh": "本地入口", "en": "Local entry"},
+  "actions.cwd": {"zh": "工作目录", "en": "Working directory"},
+  "actions.time": {"zh": "实例创建标记", "en": "Instance creation identity"},
+  "actions.pending": {"zh": "请核对目标、路径和风险后再确认。", "en": "Verify the target, paths and risks before confirming."},
+  "actions.reason": {"zh": "原因", "en": "Reason"},
+
  "computer.working":{"zh":"正在查询电脑状态……","en":"Reading computer status…"},
  "computer.status.ok":{"zh":"已完成","en":"Completed"},
  "computer.status.partial":{"zh":"部分覆盖","en":"Partial"},
@@ -2280,6 +2315,8 @@ function localBuiltin(value) {
 }
 function errorText(value) {
   const text=String(value ?? '');
+  if(text==='needs_reconciliation')return t('actions.unknown');
+  if(['turn_action_limit','target_expired','identity_changed','elevated_host','elevation_required','launch_unavailable','journal_unavailable','environment_unavailable','action_failed','launch_failed'].includes(text))return t('actions.failed_before_dispatch');
   if (['permission_required','permission_denied'].includes(text)) return t(`computer.${text}`);
   if (['invalid_arguments','observation_expired','unsupported','timeout','internal_error','observation_budget_exceeded'].includes(text)) return t('computer.error');
   if(uiLanguage==='zh-CN')return text;

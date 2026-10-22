@@ -206,8 +206,14 @@ pub(super) fn terminate(expected: &Identity, cancel: &Cancellation) -> &'static 
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | PROCESS_SYNCHRONIZE,
     ) {
         Ok(h) => h,
+        Err("already_exited") => return "identity_unavailable",
         Err(code) => return code,
     };
+    // A missing PID is not proof. An exited HANDLE is evidence only after the
+    // precise creation identity has been matched on that same object.
+    if created(h.0).as_deref() != Some(expected.created.as_str()) {
+        return "identity_changed";
+    }
     if unsafe { WaitForSingleObject(h.0, 0) } == WAIT_OBJECT_0 {
         return "already_exited";
     }
@@ -296,6 +302,12 @@ mod tests {
         }
         let observed = capture(child.0.id()).unwrap();
         assert!(observed.created.parse::<u64>().unwrap() > 9_007_199_254_740_992);
+        let mut unavailable = observed.clone();
+        unavailable.pid = 0;
+        assert_eq!(
+            super::super::terminate(&unavailable, &Cancellation::default()),
+            "identity_unavailable"
+        );
         let cancel = Cancellation::default();
         cancel.cancel();
         assert_eq!(super::super::terminate(&observed, &cancel), "cancelled");

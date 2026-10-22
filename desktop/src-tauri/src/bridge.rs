@@ -27,6 +27,7 @@ pub struct Bridge {
     overview: Mutex<Option<Value>>,
     applications: Mutex<crate::app_actions::Catalog>,
     processes: Mutex<crate::process_actions::Catalog>,
+    maintenance_confirmation: Mutex<Option<(String, Option<String>)>>,
 }
 #[derive(Default)]
 struct Sessions {
@@ -75,6 +76,7 @@ impl Bridge {
             overview: Mutex::new(None),
             applications: Mutex::new(crate::app_actions::Catalog::default()),
             processes: Mutex::new(crate::process_actions::Catalog::default()),
+            maintenance_confirmation: Mutex::new(None),
         }
     }
     fn path(&self) -> PathBuf {
@@ -237,6 +239,7 @@ impl Bridge {
             "prepare" if !confirmed => {
                 self.reserve()?;
                 let result = (|| {
+                    self.require_no_pending_maintenance()?;
                     let mut catalog = self.processes.lock().map_err(error)?;
                     let value = catalog.prepare(reference)?;
                     if self.control.cancellation().is_cancelled() {
@@ -266,10 +269,23 @@ impl Bridge {
     pub fn application_action(&self, id: &str, action: &str) -> Result<Value, String> {
         self.reserve()?;
         let _release = Release(self);
+        self.require_no_pending_maintenance()?;
         self.applications
             .lock()
             .map_err(error)?
             .execute(id, action, &self.control.cancellation())
+    }
+    fn require_no_pending_maintenance(&self) -> Result<(), String> {
+        let directory = self.path().with_file_name("maintenance");
+        if !directory.exists() {
+            return Ok(());
+        }
+        let engine = dao_shell::software::engine::Engine::open(&directory)
+            .map_err(|_| "maintenance_journal_unavailable")?;
+        if engine.unresolved().map_err(error)? {
+            return Err("maintenance_reconciliation_required".into());
+        }
+        Ok(())
     }
     pub fn test(&self, request: ConnectionTest) -> Result<Value, String> {
         self.reserve()?;
@@ -319,6 +335,16 @@ impl Bridge {
             return Err("输入过长".into());
         }
         let action = match kind {
+            "maintenance-local" => {
+                Action::MaintenanceLocal(serde_json::from_str(&input).map_err(error)?)
+            }
+            "maintenance" => {
+                let value: Value = serde_json::from_str(&input).map_err(error)?;
+                Action::Maintenance {
+                    tool: value["tool"].as_str().ok_or("invalid_arguments")?.into(),
+                    arguments: value["arguments"].clone(),
+                }
+            }
             "say" => Action::Say(input),
             "app-targets" | "app-launch" | "app-close" | "process-terminate" => {
                 Action::Application {
@@ -441,6 +467,24 @@ impl Bridge {
         id: &str,
         approved: bool,
     ) -> Result<(), String> {
+        if self
+            .maintenance_confirmation
+            .lock()
+            .map_err(error)?
+            .as_ref()
+            .is_some_and(|p| p.0 == id)
+        {
+            return Err("maintenance_confirmation_required".into());
+        }
+        self.confirm_bound(session_id, request_id, id, approved)
+    }
+    fn confirm_bound(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        id: &str,
+        approved: bool,
+    ) -> Result<(), String> {
         let owner = self.active.lock().map_err(error)?;
         if owner.as_ref() != Some(&(session_id.into(), request_id.into())) {
             return Err("请求已失效".into());
@@ -452,6 +496,21 @@ impl Bridge {
             return Err("配置已变更，此确认已失效，请重新搜索".into());
         }
         self.control.answer(id, approved).map_err(error)
+    }
+    pub fn confirm_maintenance(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        id: &str,
+        approved: bool,
+        digest: Option<String>,
+    ) -> Result<(), String> {
+        let pending = self.maintenance_confirmation.lock().map_err(error)?;
+        let (token, expected) = pending.as_ref().ok_or("maintenance_confirmation_expired")?;
+        if token != id || (approved && digest.as_ref() != expected.as_ref()) {
+            return Err("maintenance_agreement_mismatch".into());
+        }
+        self.confirm_bound(session_id, request_id, id, approved)
     }
 }
 
@@ -471,6 +530,34 @@ impl DesktopInteraction<'_> {
     }
 }
 impl Interaction for DesktopInteraction<'_> {
+    fn confirm_maintenance(
+        &mut self,
+        plan: &Value,
+    ) -> anyhow::Result<dao_shell::software::engine::Approval> {
+        let confirmation = self.bridge.control.confirmation(Duration::from_secs(90))?;
+        let digest = plan["package"]["agreement_digest"]
+            .as_str()
+            .map(str::to_owned);
+        *self
+            .bridge
+            .maintenance_confirmation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("confirmation_unavailable"))? =
+            Some((confirmation.id.clone(), digest.clone()));
+        self.send(json!({"kind":"maintenance_prepared","request_id":confirmation.id,"plan":plan,"expires_in_seconds":90}));
+        let approved = self.bridge.control.wait(&confirmation);
+        *self
+            .bridge
+            .maintenance_confirmation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("confirmation_unavailable"))? = None;
+        self.send(json!({"kind":"confirmation_closed","request_id":confirmation.id}));
+        Ok(dao_shell::software::engine::Approval {
+            approved,
+            agreement_digest: if approved { digest } else { None },
+        })
+    }
+
     fn confirm_app_action(&mut self, plan: &Value) -> anyhow::Result<bool> {
         let confirmation = self.bridge.control.confirmation(Duration::from_secs(90))?;
         self.send(json!({"kind":"action_prepared","request_id":confirmation.id,"plan":plan,"expires_in_seconds":90}));
@@ -500,6 +587,105 @@ impl Interaction for DesktopInteraction<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_maintenance_blocks_legacy_launch_and_termination_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_path(directory.path().join("config.json"));
+        let mut engine =
+            dao_shell::software::engine::Engine::open(&directory.path().join("maintenance"))
+                .unwrap();
+        engine
+            .local_transition(
+                json!({"operation_id":"fixture","operation":"fixture"}),
+                &dao_shell::core::Cancellation::default(),
+                &mut |_| Ok(true),
+                &mut || anyhow::bail!("fixture failure"),
+            )
+            .unwrap();
+        drop(engine);
+        assert!(
+            bridge
+                .application_action("not-a-real-target", "launch")
+                .unwrap_err()
+                .contains("maintenance_reconciliation_required")
+        );
+        assert!(
+            bridge
+                .process_action("prepare", "not-a-real-target", false)
+                .unwrap_err()
+                .contains("maintenance_reconciliation_required")
+        );
+        bridge.control.reserve().unwrap();
+        bridge.control.release();
+    }
+    #[test]
+    fn maintenance_confirmation_rejects_generic_approval_wrong_digest_and_foreign_owner() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let config = Config {
+            read_roots: vec![temp.path().to_path_buf()],
+            ..Default::default()
+        };
+        config.save(&path).unwrap();
+        let bridge = Bridge::with_path(path);
+        let owner = uuid::Uuid::new_v4().to_string();
+        let foreign = uuid::Uuid::new_v4().to_string();
+        let request = uuid::Uuid::new_v4().to_string();
+        bridge.register(owner.clone()).unwrap();
+        bridge.register(foreign.clone()).unwrap();
+        bridge.reserve_for(&owner, &request).unwrap();
+        bridge.sessions.lock().unwrap().configuration = serde_json::to_string(&config).unwrap();
+        let pending = bridge
+            .control
+            .confirmation(Duration::from_secs(90))
+            .unwrap();
+        *bridge.maintenance_confirmation.lock().unwrap() =
+            Some((pending.id.clone(), Some("expected-digest".into())));
+        assert!(bridge.confirm(&owner, &request, &pending.id, true).is_err());
+        assert!(
+            bridge
+                .confirm_maintenance(&owner, &request, &pending.id, true, None)
+                .is_err()
+        );
+        assert!(
+            bridge
+                .confirm_maintenance(
+                    &foreign,
+                    &request,
+                    &pending.id,
+                    true,
+                    Some("expected-digest".into())
+                )
+                .is_err()
+        );
+        assert!(
+            bridge
+                .confirm_maintenance(&owner, &request, &pending.id, true, Some("wrong".into()))
+                .is_err()
+        );
+        bridge
+            .confirm_maintenance(
+                &owner,
+                &request,
+                &pending.id,
+                true,
+                Some("expected-digest".into()),
+            )
+            .unwrap();
+        assert!(bridge.control.wait(&pending));
+        assert!(
+            bridge
+                .confirm_maintenance(
+                    &owner,
+                    &request,
+                    &pending.id,
+                    true,
+                    Some("expected-digest".into())
+                )
+                .is_err()
+        );
+        drop(Release(&bridge));
+    }
     #[test]
     fn collection_policy_reserves_requests_invalidates_candidates_and_preserves_access_config() {
         let temp = tempfile::tempdir().unwrap();

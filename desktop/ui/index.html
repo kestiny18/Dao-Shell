@@ -28,7 +28,7 @@
         </section>
         <section id="page-files" class="page" hidden="">
           <p id="context-notice" class="notice" hidden=""><span data-i18n="ui.visible_history_is_preserved_model_context_has_restarted_old_ref">可见历史已保留；模型执行上下文已重新开始，旧指代与文件候选不可沿用，请重新描述或搜索。</span></p><section id="conversation" aria-live="polite" aria-label="对话" data-i18n-aria-label="ui.conversation"><div class="welcome" id="welcome"><div class="eyebrow"><span data-i18n="ui.one_less_step">少想一步，轻松一点</span></div><h1><span data-i18n="ui.what_are_you_looking_for">想找什么？</span></h1><p><span data-i18n="ui.describe_the_file_name_project_or_clues_you_remember">描述文件的名字、所在项目，或你记得的线索。</span></p><div class="suggestions"><button data-prompt="帮我找一下 PDF 文档" data-i18n-data-prompt="ui.help_me_find_pdf_documents"><span data-i18n="ui.find_pdf_documents">找一下 PDF 文档 ↗</span></button><button data-prompt="找一下客户端初始化的 SQL 脚本" data-i18n-data-prompt="ui.find_the_client_initialization_sql_scripts"><span data-i18n="ui.find_initialization_scripts">找到初始化脚本 ↗</span></button></div><p class="welcome-note"><span data-i18n="ui.find_real_candidates_first_then_decide_what_to_do">先找到真实候选，再决定下一步。</span></p></div></section>
-          <section id="computer-observations" aria-live="polite"></section><section id="application-action-panel" aria-live="polite"></section>
+          <section id="computer-observations" aria-live="polite"></section><section id="application-action-panel" aria-live="polite"></section><section id="maintenance-panel" aria-live="polite"></section>
           <section class="candidates" id="candidate-panel" hidden="" aria-label="文件候选" data-i18n-aria-label="ui.file_candidates"><div class="section-title"><span data-i18n="ui.files_found">找到的文件 </span><span id="candidate-count"></span></div><div id="candidate-list"></div></section>
           <section class="confirmation" id="confirmation" hidden="" role="region" aria-label="确认打开" data-i18n-aria-label="ui.confirm_open"><div class="eyebrow"><span data-i18n="ui.your_confirmation_is_needed">需要你确认</span></div><h2><span data-i18n="ui.open_this_file">打开这个文件？</span></h2><strong id="confirm-name"></strong><p id="confirm-path"></p><small><span data-i18n="ui.use_the_system_default_application_this_request_expires_after_90">交给系统默认应用打开。此请求将在 90 秒后失效。</span></small><div class="confirm-actions"><button id="reject"><span data-i18n="ui.not_now">暂不打开</span></button><button class="primary" id="approve"><span data-i18n="ui.confirm_open_298">确认打开 ↗</span></button></div></section>
         </section>
@@ -66,7 +66,7 @@
     </main>
   </div>
   <div id="decision" class="decision-overlay" role="dialog" aria-modal="true" aria-labelledby="decision-text" hidden=""><div class="decision-card"><p id="decision-text"></p><button id="decision-no"><span data-i18n="ui.keep">保留</span></button><button id="decision-yes"><span data-i18n="ui.confirm">确认</span></button></div></div>
-  <script src="i18n.js"></script><script src="app.js"></script><script src="computer-query.js"></script><script src="application-actions.js"></script><script src="diagnostics.js"></script><script src="layout.js"></script><script src="settings.js"></script><script src="home.js"></script>
+  <script src="i18n.js"></script><script src="app.js"></script><script src="computer-query.js"></script><script src="application-actions.js"></script><script src="diagnostics.js"></script><script src="maintenance.js"></script><script src="layout.js"></script><script src="settings.js"></script><script src="home.js"></script>
 
 
 </body></html>

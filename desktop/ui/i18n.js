@@ -1,5 +1,39 @@
 /* Only explicit built-in message keys are translated. User data is never scanned. */
 const messages = {
+  "maintenance.turn_limit":{"zh":"本轮已尝试一项写操作；不再派发其他动作。","en":"A write was already attempted this turn. No additional action was dispatched."},
+  "maintenance.source_required":{"zh":"请先在本地勾选并确认 WinGet 目录来源。","en":"First select and confirm the WinGet catalog source locally."},
+  "maintenance.installed_version":{"zh":"当前已装版本","en":"Currently installed version"},
+  "maintenance.dns_report":{"zh":"仅记录系统 API 对缓存清理的返回值；未验证网络连通。","en":"Records the system API result for cache clearing only; network connectivity was not verified."},
+  "maintenance.title":{"zh": "软件与系统维护", "en": "Software and system maintenance"},
+  "maintenance.source":{"zh": "允许本次会话联网查询 WinGet 官方社区目录", "en": "Allow this session to query the official WinGet community catalog"},
+  "maintenance.authorize":{"zh": "确认目录来源", "en": "Confirm catalog source"},
+  "maintenance.search":{"zh": "查询软件", "en": "Find software"},
+  "maintenance.startup":{"zh": "查询可禁用/恢复的启动项", "en": "Find Startup entries to disable/restore"},
+  "maintenance.history":{"zh": "查看维护回执", "en": "View maintenance receipts"},
+  "maintenance.dns":{"zh": "准备清理 DNS 缓存", "en": "Prepare DNS cache clearing"},
+  "maintenance.risk":{"zh": "维护可能影响软件数据和系统状态。请核对来源、版本、范围及下方具体影响。取消不保证已运行的安装器停止；未知结果不可重试。", "en": "Maintenance may affect application data and system state. Check the source, version, scope and effects below. Cancellation may not stop a running installer; never retry an unknown outcome."},
+  "maintenance.dns_risk":{"zh": "清理本机所有应用使用的系统 DNS 解析缓存，无法恢复原缓存。不会改变 DNS 服务器、代理或 IP，也不保证网络恢复。", "en": "Clears the system DNS resolver cache used by all applications on this computer. The old cache cannot be restored. DNS servers, proxy and IP settings remain unchanged; connectivity is not guaranteed."},
+  "maintenance.startup_risk":{"zh": "仅移动当前用户 Startup 文件夹的快捷方式，影响下次登录。不会停止当前应用，也不证明该条目原本启用。恢复时不覆盖同名文件。", "en": "Moves a shortcut in the current user Startup folder for the next sign-in. Does not stop a running application or prove its enabled state. Restore never overwrites an existing file."},
+  "maintenance.approve":{"zh": "确认执行此方案", "en": "Confirm this plan"},
+  "maintenance.cancel":{"zh": "取消", "en": "Cancel"},
+  "maintenance.terms":{"zh": "我已查看并接受上方本次版本的全部协议", "en": "I have reviewed and accept all agreements shown above for this version"},
+  "maintenance.pending":{"zh": "本次确认 90 秒有效，方案变化需重新确认。", "en": "This confirmation expires after 90 seconds. Changes require a new confirmation."},
+  "maintenance.progress":{"zh": "正在等待系统提供程序，取消后可能仍需核对结果…", "en": "Waiting for the system provider. Results may still need checking after cancellation…"},
+  "maintenance.install":{"zh": "安装", "en": "Install"},
+  "maintenance.upgrade":{"zh": "更新", "en": "Upgrade"},
+  "maintenance.uninstall":{"zh": "卸载", "en": "Uninstall"},
+  "maintenance.disable":{"zh": "禁用启动登记", "en": "Disable Startup registration"},
+  "maintenance.restore":{"zh": "恢复启动登记", "en": "Restore Startup registration"},
+  "maintenance.verified":{"zh": "已核验该操作的限定结果", "en": "The limited result of this operation was verified"},
+  "maintenance.failed":{"zh": "系统提供程序报告失败", "en": "The system provider reported failure"},
+  "maintenance.unknown":{"zh": "结果未知：先人工核对，禁止自动重试", "en": "Outcome unknown: check manually before any new action"},
+  "maintenance.awaiting_user":{"zh": "等待安装器或系统交互，不代表完成", "en": "Awaiting installer or system interaction; incomplete"},
+  "maintenance.awaiting_reboot":{"zh": "需要重启后核对，不自动重启", "en": "Needs a check after restart; no automatic restart"},
+  "maintenance.cancelled_before_dispatch":{"zh": "已取消，尚未派发", "en": "Cancelled before dispatch"},
+  "maintenance.empty":{"zh": "没有受支持的候选；不能据此认定软件未安装或启动项未启用。", "en": "No supported candidates. This does not prove absence or disabled state."},
+  "maintenance.warning":{"zh": "回执保存失败，重启后按未知结果核对。", "en": "Receipt persistence failed. Treat recovery as unknown."},
+  "maintenance.provider":{"zh": "本机软件提供程序不可用或引用已失效；请查看测试环境说明，不会回退到命令行安装。", "en": "The software provider is unavailable or the reference expired. See test-environment instructions. No command-line installation fallback is used."},
+
   "diagnostics.metric_cpu":{"zh":"整机CPU区间平均","en":"Total-machine CPU interval average"},
   "diagnostics.ac": {"zh": "外接电源", "en": "AC power"},
   "diagnostics.battery": {"zh": "电池电量", "en": "Battery charge"},
@@ -2390,6 +2424,10 @@ function localBuiltin(value) {
 }
 function errorText(value) {
   const text=String(value ?? '');
+  if(text==='maintenance_reconciliation_required')return t('maintenance.unknown');
+  if(text==='side_effect_already_attempted')return t('maintenance.turn_limit');
+  if(text==='software_source_confirmation_required')return t('maintenance.source_required');
+  if(text==='maintenance_unavailable_or_stale')return t('maintenance.provider');
   if(text==='needs_reconciliation')return t('actions.unknown');
   if(['turn_action_limit','target_expired','identity_changed','elevated_host','elevation_required','launch_unavailable','journal_unavailable','environment_unavailable','action_failed','launch_failed'].includes(text))return t('actions.failed_before_dispatch');
   if (['permission_required','permission_denied'].includes(text)) return t(`computer.${text}`);

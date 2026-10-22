@@ -94,6 +94,24 @@ fn confirm_open(
 }
 
 #[tauri::command]
+fn confirm_maintenance(
+    state: State<'_, Arc<Bridge>>,
+    session_id: String,
+    execution_id: String,
+    request_id: String,
+    approved: bool,
+    agreement_digest: Option<String>,
+) -> Result<(), String> {
+    state.confirm_maintenance(
+        &session_id,
+        &execution_id,
+        &request_id,
+        approved,
+        agreement_digest,
+    )
+}
+
+#[tauri::command]
 fn cancel(
     state: State<'_, Arc<Bridge>>,
     session_id: Option<String>,
@@ -238,6 +256,7 @@ fn main() {
             register_session,
             perform,
             confirm_open,
+            confirm_maintenance,
             cancel,
             get_settings,
             save_settings,

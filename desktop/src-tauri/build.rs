@@ -13,6 +13,7 @@ fn main() {
             "choose_directory",
             "perform",
             "confirm_open",
+            "confirm_maintenance",
             "cancel",
             "get_settings",
             "save_settings",

@@ -29,6 +29,7 @@ async function fixture(options = {}) {
     if (command === 'choose_directory') { if(options.directoryError) throw Error('picker unavailable'); return options.directory ?? null; }
     if (command === 'save_settings') { if(options.settingsFailure) throw Error('settings disk full'); assert.equal(args.update.expected_revision, current.revision); current = { revision:'saved', credential_available:[],config:clone(args.update.config) }; return {...clone(current),effective_language:current.config.ui_language==='en'?'en':current.config.ui_language==='zh-CN'?'zh-CN':options.systemLanguage || 'zh-CN'}; }
     if (command === 'test_connection') return { elapsed_ms:20,total_tokens:null };
+    if (command === 'confirm_maintenance' && options.confirmMaintenance) return options.confirmMaintenance(args);
     if (command === 'confirm_open' && options.confirmApplication) return options.confirmApplication(args);
     if (command === 'application_action') { if(options.appAction) return options.appAction(args); return {status:'handed_off',message:'已交给 Windows'}; }
     if (command === 'process_action' && options.processAction) return options.processAction(args);
@@ -48,7 +49,7 @@ async function fixture(options = {}) {
     if (command === 'cancel') { if (!options.deferCancel) pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['i18n.js','app.js','computer-query.js','application-actions.js','diagnostics.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['i18n.js','app.js','computer-query.js','application-actions.js','diagnostics.js','maintenance.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -957,3 +958,30 @@ test('English count labels avoid singular-plural errors and explain manual langu
  f.$('diagnostic-confirm-target').checked=true;f.$('diagnostic-register').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').length,1);assert.match(f.$('diagnostic-approved').textContent,/private.internal/);assert.equal(f.$('diagnostic-confirm-target').checked,false);
  await f.w.run('computer',JSON.stringify({tool:'startup_list',arguments:{source:'user'}}));await f.tick();assert.match(f.$('diagnostic-results').textContent,/SECRET_COMMAND/);assert.equal(f.$('diagnostic-results').querySelector('img'),null);const saved=JSON.stringify(f.saved());assert(!saved.includes('SECRET_COMMAND'));assert(!saved.includes('private.internal'));
  });
+
+
+test('maintenance agreements bind confirmation to its owner and stay out of workspace history',async(t)=>{
+ let finish;const secret='PRIVATE_LICENSE_TERMS';
+ const f=await fixture({perform:async(args,emit)=>{
+  emit({kind:'maintenance_prepared',request_id:'opaque-maintenance-token',plan:{operation:'install',package:{name:'<img src=x>',identity:{source_id:'winget',package_id:'Fixture.Safe',version:'1',scope:'user'},agreements:[secret],agreement_digest:'fixture-digest'}}});
+  await new Promise(resolve=>{finish=resolve;});return {message:'done',error:false,items:[]};
+ },confirmMaintenance:async()=>{finish();}});t.after(()=>f.dom.window.close());
+ f.$('input').value='maintenance fixture';f.submit('composer');await f.tick();
+ const root=f.$('maintenance-panel');assert.equal(root.querySelector('img'),null);assert.match(root.textContent,/Fixture.Safe/);
+ const yes=[...root.querySelectorAll('button')].find(b=>b.textContent==='确认执行此方案');assert.equal(yes.disabled,true);
+ await f.w.answerMaintenance(true);assert.equal(f.calls.filter(c=>c.command==='confirm_maintenance').length,0);
+ const accept=root.querySelector('.confirmation input[type=checkbox]');accept.checked=true;accept.dispatchEvent(new f.w.Event('change'));assert.equal(yes.disabled,false);
+ yes.click();await f.tick();
+ const answer=f.calls.find(c=>c.command==='confirm_maintenance');assert.equal(answer.args.agreementDigest,'fixture-digest');assert.equal(answer.args.approved,true);
+ const saved=JSON.stringify(f.saved());assert.equal(saved.includes(secret),false);assert.equal(saved.includes('opaque-maintenance-token'),false);assert.equal(saved.includes('fixture-digest'),false);
+});
+
+test('maintenance source opt-in, result fallback and context reset revoke volatile references',async(t)=>{
+ const f=await fixture({perform:async(args)=>({message:'done',error:false,items:[],maintenance_results:[{source_ref:'private-source-token'}]})});t.after(()=>f.dom.window.close());
+ f.$('input').value='create';f.submit('composer');await f.tick();
+ const st=f.w.eval('state(workspace.active)');st.maintenanceSource=null;f.w.eval('renderCurrent()');
+ const root=f.$('maintenance-panel');const authorize=[...root.querySelectorAll('button')].find(b=>b.textContent==='确认目录来源');assert.equal(authorize.disabled,true);
+ const check=root.querySelector('input[type=checkbox]');check.checked=true;check.dispatchEvent(new f.w.Event('change'));authorize.click();await f.tick();
+ assert.equal(st.maintenanceSource,'private-source-token');assert.equal(JSON.stringify(f.saved()).includes('private-source-token'),false);
+ f.w.eval('invalidateContexts()');assert.equal(st.maintenanceSource,null);
+});

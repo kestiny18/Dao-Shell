@@ -601,12 +601,16 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "sysinfo",
  "tempfile",
  "tokio",
  "uuid",
  "walkdir",
  "windows 0.62.2",
+ "windows-collections 0.3.2",
+ "windows-core 0.62.2",
+ "windows-future 0.3.2",
  "windows-sys 0.61.2",
 ]
 

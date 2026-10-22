@@ -10,6 +10,7 @@
     "allow-language-info", "allow-session-info",
     "allow-perform",
     "allow-confirm-open",
+    "allow-confirm-maintenance",
     "allow-cancel",
     "allow-get-settings",
     "allow-save-settings",

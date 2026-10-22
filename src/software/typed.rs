@@ -14,6 +14,29 @@ pub struct NativeProvider {
     manager: PackageManager,
     _apartment: Apartment,
 }
+// A nullable COM result is absence only when HRESULT itself succeeded.
+fn installed_version(package: &CatalogPackage) -> Result<Option<PackageVersionInfo>> {
+    unsafe {
+        let mut raw = std::ptr::null_mut();
+        let hr =
+            (Interface::vtable(package).InstalledVersion)(Interface::as_raw(package), &mut raw);
+        hr.ok()?;
+        Ok(if raw.is_null() {
+            None
+        } else {
+            Some(PackageVersionInfo::from_raw(raw))
+        })
+    }
+}
+fn installation_fingerprint(mut keys: Vec<String>) -> Result<String> {
+    keys.sort();
+    keys.dedup();
+    ensure!(
+        keys.len() == 1 && !keys[0].is_empty(),
+        "installation_instance_ambiguous"
+    );
+    Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(&keys)?)))
+}
 fn create<T: Interface>(id: u128) -> windows_core::Result<T> {
     unsafe { CoCreateInstance(&GUID::from_u128(id), None, CLSCTX_ALL) }
 }
@@ -151,19 +174,7 @@ impl NativeProvider {
                 },
             "installer_scope_unknown"
         );
-        let installed = unsafe {
-            let mut raw = std::ptr::null_mut();
-            let hr = (Interface::vtable(&package).InstalledVersion)(
-                Interface::as_raw(&package),
-                &mut raw,
-            );
-            hr.ok()?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(PackageVersionInfo::from_raw(raw))
-            }
-        };
+        let installed = installed_version(&package)?;
         let installation = if let Some(installed) = installed {
             let scope = installed
                 .GetMetadata(PackageVersionMetadataField::InstalledScope)?
@@ -175,7 +186,7 @@ impl NativeProvider {
                 }) || id.scope == Scope::System && scope.eq_ignore_ascii_case("system"),
                 "installed_scope_unknown"
             );
-            let mut keys: Vec<String> = installed
+            let keys: Vec<String> = installed
                 .ProductCodes()?
                 .into_iter()
                 .map(|s| s.to_string())
@@ -186,10 +197,7 @@ impl NativeProvider {
                         .map(|s| s.to_string()),
                 )
                 .collect();
-            keys.sort();
-            keys.dedup();
-            ensure!(!keys.is_empty(), "installation_instance_unknown");
-            let instance = format!("{:x}", Sha256::digest(serde_json::to_vec(&keys)?));
+            let instance = installation_fingerprint(keys)?;
             let mut installed_id = id.clone();
             installed_id.version = installed.Version()?.to_string();
             Installation::Present {
@@ -197,7 +205,23 @@ impl NativeProvider {
                 instance,
             }
         } else {
-            Installation::AbsentVerified { scope: id.scope }
+            // User-scope absence cannot authorize a duplicate of a machine installation (or vice versa).
+            let other_scope = match id.scope {
+                Scope::User => Scope::System,
+                Scope::System => Scope::User,
+            };
+            let mut other = self.find(&id.package_id, true, other_scope)?;
+            ensure!(
+                other.len() == 1 && other[0].Id()? == id.package_id,
+                "other_scope_state_unknown"
+            );
+            if installed_version(&other.remove(0))?.is_some() {
+                Installation::Unknown {
+                    reason: "other_scope_installation_present".into(),
+                }
+            } else {
+                Installation::AbsentVerified { scope: id.scope }
+            }
         };
         let mut agreements = Vec::new();
         for a in info.GetCatalogPackageMetadata()?.Agreements()? {
@@ -381,5 +405,22 @@ impl Stage for UninstallProgress {
             2 => "post_uninstall",
             _ => "provider_progress",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn multiple_native_registration_keys_are_not_one_installation() {
+        assert!(installation_fingerprint(vec![]).is_err());
+        assert!(installation_fingerprint(vec!["".into()]).is_err());
+        assert!(
+            installation_fingerprint(vec!["product-one".into(), "product-two".into()]).is_err()
+        );
+        assert_eq!(
+            installation_fingerprint(vec!["product-one".into()]).unwrap(),
+            installation_fingerprint(vec!["product-one".into(), "product-one".into()]).unwrap()
+        );
     }
 }

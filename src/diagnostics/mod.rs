@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     time::{Duration, Instant},
 };
 pub mod coverage;
@@ -22,6 +22,7 @@ pub struct Diagnostics {
     series: VecDeque<(Instant, Value)>,
     pub endpoints: network::Endpoints,
     pub portable: Vec<std::path::PathBuf>,
+    startup_cursors: HashMap<String, (String, String, usize)>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,6 +67,93 @@ impl Diagnostics {
             self.series.pop_front();
         }
     }
+    pub fn explanation(&mut self, id: &str) -> Result<Value> {
+        self.prune();
+        self.series
+            .iter()
+            .find(|(_, v)| v["observation_id"] == id && v["kind"] == "resource_observe")
+            .map(|(_, v)| projection(v))
+            .ok_or_else(|| anyhow::anyhow!("observation_expired"))
+    }
+    pub fn startup(&mut self, args: Value, cancel: &Cancellation) -> Result<Value> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Request {
+            source: String,
+            #[serde(default)]
+            filter: String,
+            #[serde(default = "limit")]
+            limit: usize,
+            #[serde(default)]
+            cursor: Option<String>,
+        }
+        fn limit() -> usize {
+            20
+        }
+        let r: Request =
+            serde_json::from_value(args).map_err(|_| anyhow::anyhow!("invalid_arguments"))?;
+        ensure!(
+            matches!(r.source.as_str(), "user" | "machine")
+                && r.filter.len() <= 128
+                && (1..=50).contains(&r.limit),
+            "invalid_arguments"
+        );
+        self.prune();
+        self.startup_cursors
+            .retain(|_, (id, _, _)| self.series.iter().any(|(_, v)| v["observation_id"] == *id));
+        let signature = json!([r.source, r.filter, r.limit]).to_string();
+        let (mut value, offset) = if let Some(cursor) = r.cursor {
+            let (id, sig, offset) = self
+                .startup_cursors
+                .get(&cursor)
+                .ok_or_else(|| anyhow::anyhow!("observation_expired"))?;
+            ensure!(sig == &signature, "invalid_arguments");
+            (
+                self.series
+                    .iter()
+                    .find(|(_, v)| v["observation_id"] == *id)
+                    .ok_or_else(|| anyhow::anyhow!("observation_expired"))?
+                    .1
+                    .clone(),
+                *offset,
+            )
+        } else {
+            let value = coverage::startup(
+                json!({"source":r.source,"filter":r.filter,"limit":512}),
+                cancel,
+            )?;
+            self.series.push_back((Instant::now(), value.clone()));
+            self.prune();
+            (value, 0)
+        };
+        let rows = value["data"]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let items: Vec<_> = rows.iter().skip(offset).take(r.limit).cloned().collect();
+        let next = if offset + items.len() < rows.len() {
+            ensure!(
+                self.startup_cursors.len() < 1024,
+                "observation_budget_exceeded"
+            );
+            let cursor = uuid::Uuid::new_v4().to_string();
+            self.startup_cursors.insert(
+                cursor.clone(),
+                (
+                    value["observation_id"].as_str().unwrap().into(),
+                    signature,
+                    offset + items.len(),
+                ),
+            );
+            Some(cursor)
+        } else {
+            None
+        };
+        value["data"]["items"] = json!(items);
+        value["data"]["page"] = json!({"offset":offset,"next_cursor":next});
+        value["query"] = json!({"source":r.source,"filter":r.filter,"limit":r.limit});
+        Ok(value)
+    }
     pub fn observe(
         &mut self,
         request: Observe,
@@ -108,6 +196,7 @@ impl Diagnostics {
         let mut late = false;
         let mut previous = 0.;
         let mut stopped = false;
+        let mut reset_next = false;
         let interval = Duration::from_millis(request.interval_ms);
         let slots = request.duration_s * 1000 / request.interval_ms;
         for slot in 0..=slots {
@@ -139,7 +228,7 @@ impl Diagnostics {
             let mut values = if late {
                 BTreeMap::new()
             } else {
-                collector.sample(seconds, slot == 0 || gap || drift)
+                collector.sample(seconds, slot == 0 || gap || drift || reset_next)
             };
             if cancel.is_cancelled() {
                 stopped = true;
@@ -157,7 +246,18 @@ impl Diagnostics {
             if drift || gap {
                 values.retain(|key, _| key.starts_with("memory") || key.starts_with("power"));
             }
+            reset_next = late || gap || drift;
             late = point_start.elapsed() > Duration::from_millis(500);
+            if late
+                && !collector
+                    .reasons
+                    .iter()
+                    .any(|r| r == "provider_soft_budget_exceeded")
+            {
+                collector
+                    .reasons
+                    .push("provider_soft_budget_exceeded".into());
+            }
             points.push(json!({"elapsed_ms":elapsed.as_millis(),"observed_at":now(),"values":values,"unknown_reason":reason}));
             previous = seconds;
             event(
@@ -183,7 +283,7 @@ impl Diagnostics {
         let get = |id: &str| {
             self.series
                 .iter()
-                .find(|(_, v)| v["observation_id"] == id)
+                .find(|(_, v)| v["observation_id"] == id && v["kind"] == "resource_observe")
                 .map(|(_, v)| v)
                 .ok_or_else(|| anyhow::anyhow!("observation_expired"))
         };
@@ -274,11 +374,42 @@ pub fn projection(local: &Value) -> Value {
             out["data"]["representative_points"] =
                 json!(rows.iter().step_by(stride).take(20).collect::<Vec<_>>());
             out["data"]["statistics_are_local_deterministic"] = json!(true);
+            // Summary rows take priority over representative points within the model budget.
+            let mut omitted = 0usize;
+            while out.to_string().len() > 32 * 1024 {
+                if let Some(rows) = out["data"]["representative_points"].as_array_mut() {
+                    if !rows.is_empty() {
+                        rows.pop();
+                        continue;
+                    }
+                }
+                let key = out["data"]["summary"]
+                    .as_object()
+                    .and_then(|o| {
+                        o.keys()
+                            .rev()
+                            .find(|k| k.starts_with("gpu."))
+                            .or_else(|| o.keys().next_back())
+                    })
+                    .cloned();
+                let Some(key) = key else {
+                    break;
+                };
+                out["data"]["summary"].as_object_mut().unwrap().remove(&key);
+                out["data"]["metric_definitions"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(&key);
+                omitted += 1;
+            }
+            if omitted > 0 {
+                out["model_projection_metrics_omitted"] = json!(omitted);
+            }
         }
         "observation_compare" => out["data"] = d.clone(),
         "network_diagnose" => out["data"] = network::projection(d),
         "startup_list" => {
-            out["data"] = json!({"count":d["count"],"items":d["items"].as_array().into_iter().flatten().map(|r|json!({"name":r["name"],"source":r["source"],"enabled":"unknown"})).collect::<Vec<_>>(),"page":d["page"]})
+            out["data"] = json!({"count":d["count"],"items":d["items"].as_array().into_iter().flatten().map(|r|json!({"name":r["name"].as_str().map(|s|s.chars().filter(|c|!c.is_control()).take(256).collect::<String>()),"source":r["source"],"enabled":"unknown"})).collect::<Vec<_>>(),"page":d["page"]})
         }
         _ => (),
     }
@@ -315,20 +446,65 @@ mod tests {
         );
     }
     #[test]
-    fn compare_requires_matching_identity_and_sufficient_points(){
-        let mut d=Diagnostics::default();
-        for (id,identity,points) in [("a","instance1",2),("b","instance2",2),("c","instance1",1)] {
-            d.series.push_back((Instant::now(),json!({"observation_id":id,"data":{"metric_definitions":{"process.1.cpu":{"unit":"percent","local_identity":identity}},"summary":{"process.1.cpu":{"valid_points":points,"time_weighted_mean":10}}}})));
+    fn compare_requires_matching_identity_and_sufficient_points() {
+        let mut d = Diagnostics::default();
+        for (id, identity, points) in [
+            ("a", "instance1", 2),
+            ("b", "instance2", 2),
+            ("c", "instance1", 1),
+        ] {
+            d.series.push_back((Instant::now(),json!({"observation_id":id,"kind":"resource_observe","data":{"metric_definitions":{"process.1.cpu":{"unit":"percent","local_identity":identity}},"summary":{"process.1.cpu":{"valid_points":points,"time_weighted_mean":10}}}})));
         }
-        assert_eq!(d.compare(json!({"left_id":"a","right_id":"b"})).unwrap()["data"]["comparisons"]["process.1.cpu"]["status"],"incompatible_definition_or_identity");
-        assert_eq!(d.compare(json!({"left_id":"a","right_id":"c"})).unwrap()["data"]["comparisons"]["process.1.cpu"]["status"],"insufficient_samples");
+        assert_eq!(
+            d.compare(json!({"left_id":"a","right_id":"b"})).unwrap()["data"]["comparisons"]["process.1.cpu"]
+                ["status"],
+            "incompatible_definition_or_identity"
+        );
+        assert_eq!(
+            d.compare(json!({"left_id":"a","right_id":"c"})).unwrap()["data"]["comparisons"]["process.1.cpu"]
+                ["status"],
+            "insufficient_samples"
+        );
     }
     #[test]
-    fn cancellation_keeps_only_completed_points_without_restarting(){
-        let mut d=Diagnostics::default();let cancel=Cancellation::default();let token=cancel.clone();let mut events=0;
-        let value=d.observe(Observe{domains:vec!["memory".into()],duration_s:30,interval_ms:1000,process_refs:vec![]},vec![],&cancel,&mut |_|{events+=1;token.cancel();}).unwrap();
-        assert_eq!(events,1);assert_eq!(value["status"],"stopped");assert_eq!(value["data"]["series"].as_array().unwrap().len(),1);assert_eq!(value["data"]["summary"]["memory.used_bytes"]["trend_status"],"insufficient_samples");
-        let invalid=Observe{domains:vec!["cpu".into()],duration_s:86400,interval_ms:1,process_refs:vec![]};assert!(d.observe(invalid,vec![],&Cancellation::default(),&mut |_|{}).is_err());
+    fn cancellation_keeps_only_completed_points_without_restarting() {
+        let mut d = Diagnostics::default();
+        let cancel = Cancellation::default();
+        let token = cancel.clone();
+        let mut events = 0;
+        let value = d
+            .observe(
+                Observe {
+                    domains: vec!["memory".into()],
+                    duration_s: 30,
+                    interval_ms: 1000,
+                    process_refs: vec![],
+                },
+                vec![],
+                &cancel,
+                &mut |_| {
+                    events += 1;
+                    token.cancel();
+                },
+            )
+            .unwrap();
+        assert_eq!(events, 1);
+        assert_eq!(value["status"], "stopped");
+        assert_eq!(value["data"]["series"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            value["data"]["summary"]["memory.used_bytes"]["trend_status"],
+            "insufficient_samples"
+        );
+        let invalid = Observe {
+            domains: vec!["cpu".into()],
+            duration_s: 86400,
+            interval_ms: 1,
+            process_refs: vec![],
+        };
+        assert!(
+            d.observe(invalid, vec![], &Cancellation::default(), &mut |_| {})
+                .is_err()
+        );
     }
     #[test]
     fn projection_never_shares_native_identity() {

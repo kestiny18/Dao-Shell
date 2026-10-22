@@ -246,6 +246,7 @@ dependencies = [
  "clap",
  "ctrlc",
  "dirs",
+ "native-tls",
  "notify",
  "png",
  "reqwest",

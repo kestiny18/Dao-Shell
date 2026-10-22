@@ -45,6 +45,7 @@ pub enum Action {
     ReconcileAction(String),
     ClearCompletedActions,
     DiagnosticLocal(serde_json::Value),
+    ExplainDiagnostic(String),
     QueryComputer {
         tool: String,
         arguments: serde_json::Value,
@@ -177,6 +178,19 @@ impl FileSession {
     async fn perform(&mut self, action: Action, ui: &mut dyn Interaction) -> Result<String> {
         let selected = matches!(&action, Action::OpenSelected(_));
         match action {
+            Action::ExplainDiagnostic(id) => {
+                ensure!(
+                    self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled,
+                    "permission_denied"
+                );
+                let snapshot = self.runtime.computer.diagnostics.explanation(&id)?;
+                let dialogue = self
+                    .dialogue
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("model_unavailable"))?;
+                dialogue.observe_local("resource_observe", &snapshot);
+                dialogue.turn(self.language.choose("只解释这次已完成资源观测的确定性摘要，区分事实、相关性、假设；不调用工具或准备动作。","Explain only this completed observation's deterministic summary. Separate facts, correlation and hypotheses; do not call tools or prepare actions."),&mut self.runtime,ui).await
+            }
             Action::ExplainComputer(snapshot) => {
                 ensure!(
                     self.runtime.computer.sharing == crate::config::ComputerQuerySharing::Enabled,

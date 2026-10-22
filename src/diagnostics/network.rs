@@ -192,7 +192,11 @@ pub fn public_ip(ip: IpAddr) -> bool {
     }
 }
 fn allowed(ip: IpAddr, local: bool) -> bool {
-    if let IpAddr::V6(ip)=ip {if let Some(v4)=ip.to_ipv4_mapped(){return allowed(v4.into(),local);}}
+    if let IpAddr::V6(ip) = ip {
+        if let Some(v4) = ip.to_ipv4_mapped() {
+            return allowed(v4.into(), local);
+        }
+    }
     let metadata = ip == "169.254.169.254".parse::<IpAddr>().unwrap()
         || ip == "100.100.100.200".parse::<IpAddr>().unwrap();
     !metadata
@@ -272,7 +276,10 @@ fn probe(
                 continue;
             }
         };
-        if cancel.is_cancelled()||total.elapsed()>Duration::from_secs(20){layers.push(json!({"layer":layer,"status":"not_run","code":"cancelled_or_budget"}));break;}
+        if cancel.is_cancelled() || total.elapsed() > Duration::from_secs(20) {
+            layers.push(json!({"layer":layer,"status":"not_run","code":"cancelled_or_budget"}));
+            break;
+        }
         let start = Instant::now();
         let result = if layer == "tcp" {
             match TcpStream::connect_timeout(&checked[0], Duration::from_secs(3)) {
@@ -285,11 +292,11 @@ fn probe(
             let host = e.host.clone();
             let port = e.port;
             let handle = std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async move{
-    let mut builder=reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(3)).connect_timeout(Duration::from_secs(3));builder=builder.resolve_to_addrs(&host,&checked);
-    let client=match builder.build(){Ok(c)=>c,Err(_)=>return json!({"layer":"https","status":"failed","code":"https_client_unavailable"})};
-    match client.head(format!("https://{host}:{port}/")).send().await{Ok(response)=>json!({"layer":"https","status":"response","http_status":response.status().as_u16(),"redirect_followed":false,"redirect_requires_new_confirmation":response.status().is_redirection(),"proxy_used":false}),Err(error)=>json!({"layer":"https","status":"failed","code":if error.is_timeout(){"https_timeout"}else if error.is_connect(){"tls_or_connect_failed"}else{"https_failed"},"proxy_used":false})}
-   })
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(https_head(host, port, checked, reqwest::Client::builder()))
             });
             handle.join().unwrap_or_else(
                 |_| json!({"layer":"https","status":"failed","code":"provider_failed"}),
@@ -306,6 +313,33 @@ fn probe(
     }
     out["layers"] = json!(layers);
     out
+}
+async fn https_head(
+    host: String,
+    port: u16,
+    checked: Vec<SocketAddr>,
+    builder: reqwest::ClientBuilder,
+) -> Value {
+    let builder = builder
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(3))
+        .connect_timeout(Duration::from_secs(3))
+        .resolve_to_addrs(&host, &checked);
+    let client = match builder.build() {
+        Ok(c) => c,
+        Err(_) => {
+            return json!({"layer":"https","status":"failed","code":"https_client_unavailable"});
+        }
+    };
+    match client.head(format!("https://{host}:{port}/")).send().await {
+        Ok(response) => {
+            json!({"layer":"https","status":"response","http_status":response.status().as_u16(),"redirect_followed":false,"redirect_requires_new_confirmation":response.status().is_redirection(),"proxy_used":false})
+        }
+        Err(error) => {
+            json!({"layer":"https","status":"failed","code":if error.is_timeout(){"https_timeout"}else if error.is_connect(){"tls_or_connect_failed"}else{"https_failed"},"proxy_used":false})
+        }
+    }
 }
 pub fn projection(data: &Value) -> Value {
     if data["mode"] == "probe" {
@@ -346,6 +380,94 @@ mod tests {
         }
         assert!(public_ip("8.8.8.8".parse().unwrap()));
         assert!(!allowed("169.254.169.254".parse().unwrap(), true));
+    }
+    #[test]
+    fn mixed_dns_scopes_mapped_metadata_and_projection() {
+        let addresses: Vec<SocketAddr> = vec![
+            "8.8.8.8:443".parse().unwrap(),
+            "10.0.0.1:443".parse().unwrap(),
+        ];
+        assert!(!addresses.iter().all(|a| allowed(a.ip(), false)));
+        assert!(!allowed("::ffff:169.254.169.254".parse().unwrap(), true));
+        let p = projection(
+            &json!({"mode":"probe","targets":[{"label":"Target 1","local_host":"secret.internal","local_addresses":["10.0.0.1"],"layers":[{"layer":"dns","status":"ok"}]}]}),
+        );
+        assert!(!p.to_string().contains("secret"));
+        assert!(!p.to_string().contains("10.0.0.1"));
+    }
+    #[test]
+    fn controlled_tcp_and_tls_failure_and_one_use() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let thread = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            drop(socket);
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+                .unwrap();
+        });
+        let mut endpoints = Endpoints::default();
+        let value=endpoints.register(json!({"host":"127.0.0.1","port":port,"scope":"local","checks":["dns","tcp","https"]})).unwrap();
+        let args = json!({"mode":"probe","endpoint_refs":[value["endpoint_ref"]],"checks":["dns","tcp","https"]});
+        let v = endpoints
+            .query(args.clone(), &Cancellation::default())
+            .unwrap();
+        thread.join().unwrap();
+        let layers = v["data"]["targets"][0]["layers"].as_array().unwrap();
+        assert_eq!(layers[1]["status"], "ok");
+        assert_eq!(layers[2]["status"], "failed");
+        assert_eq!(layers[2]["proxy_used"], false);
+        assert!(endpoints.query(args, &Cancellation::default()).is_err());
+    }
+    #[test]
+    fn pinned_https_head_no_redirect_no_proxy_and_no_dns_fallback() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+        };
+        let tls = native_tls::Identity::from_pkcs12(
+            include_bytes!("../../tests/fixtures/diagnostic-tls/identity.pfx"),
+            "synthetic-fixture-only",
+        )
+        .unwrap();
+        let acceptor = native_tls::TlsAcceptor::new(tls).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut stream = acceptor.accept(socket).unwrap();
+            let mut bytes = [0; 8192];
+            let n = stream.read(&mut bytes).unwrap();
+            let text = String::from_utf8_lossy(&bytes[..n]);
+            assert!(text.starts_with("HEAD / HTTP/1.1"));
+            assert!(!text.to_lowercase().contains("authorization:"));
+            assert!(!text.to_lowercase().contains("cookie:"));
+            stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: https://169.254.169.254/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        });
+        let root = reqwest::Certificate::from_pem(include_bytes!(
+            "../../tests/fixtures/diagnostic-tls/cert.pem"
+        ))
+        .unwrap();
+        let builder = reqwest::Client::builder()
+            .add_root_certificate(root)
+            .proxy(reqwest::Proxy::all("http://127.0.0.1:1").unwrap());
+        let value = tokio::runtime::Runtime::new().unwrap().block_on(https_head(
+            "probe.dao.invalid".into(),
+            addr.port(),
+            vec![addr],
+            builder,
+        ));
+        server.join().unwrap();
+        assert_eq!(value["http_status"], 302);
+        assert_eq!(value["redirect_followed"], false);
+        assert_eq!(value["redirect_requires_new_confirmation"], true);
+        assert_eq!(value["proxy_used"], false);
     }
     #[test]
     fn forged_ref_or_added_check_makes_no_request() {

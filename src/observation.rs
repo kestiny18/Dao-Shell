@@ -139,14 +139,17 @@ impl Store {
                             .as_u64()
                             .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?,
                         label: format!("process.{}", selected.len() + 1),
-                        created:row["created_filetime"].as_str().ok_or_else(||anyhow::anyhow!("observation_expired"))?.into(),
+                        created: row["created_filetime"]
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("observation_expired"))?
+                            .into(),
                     });
                 }
                 self.diagnostics.observe(request, selected, cancel, event)?
             }
             "observation_compare" => self.diagnostics.compare(arguments)?,
             "network_diagnose" => self.diagnostics.endpoints.query(arguments, cancel)?,
-            "startup_list" => crate::diagnostics::coverage::startup(arguments, cancel)?,
+            "startup_list" => self.diagnostics.startup(arguments, cancel)?,
             _ => unreachable!(),
         };
         self.delivered.push(value.clone());
@@ -533,7 +536,7 @@ fn network(sample: u64, cancel: &Cancellation) -> Result<Value> {
             a["received_bytes_per_second"].is_null() || a["transmitted_bytes_per_second"].is_null()
         });
     Ok(
-        json!({"adapters":adapters,"observed_at":now(),"started_at":began_at,"sample_ms":began.elapsed().as_millis(),"partial":changed,"limits":"Short interface-counter sample; IP configured does not prove internet connectivity. No active probes."}),
+        json!({"schema_version":2,"configuration_scope":"rate snapshot only; network_diagnose local reads route/DNS/proxy configuration","adapters":adapters,"observed_at":now(),"started_at":began_at,"sample_ms":began.elapsed().as_millis(),"partial":changed,"limits":"Short interface-counter sample; IP configured does not prove internet connectivity. No active probes."}),
     )
 }
 

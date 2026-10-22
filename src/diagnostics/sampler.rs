@@ -160,10 +160,32 @@ impl Sampler {
                 let p = self
                     .system
                     .process(sysinfo::Pid::from_u32(selected.pid))
-                    .filter(|p| p.start_time() == selected.started && crate::process_control::creation(selected.pid).as_deref()==Some(selected.created.as_str()));
-                let cpu = p.map(|p| p.cpu_usage() as f64 / self.system.cpus().len().max(1) as f64);
-                let memory = p.map(|p| p.memory() as f64);
+                    .filter(|p| {
+                        p.start_time() == selected.started
+                            && crate::process_control::creation(selected.pid).as_deref()
+                                == Some(selected.created.as_str())
+                    });
+                let cpu_key = format!("cpu:{identity}");
+                let cumulative = p.map(|p| p.accumulated_cpu_time());
+                let cpu = cumulative
+                    .and_then(|value| {
+                        rate(self.previous.get(&cpu_key).map(|v| v.0), value, dt * 1000.)
+                    })
+                    .map(|n| n * 100. / self.system.cpus().len().max(1) as f64);
+                if let Some(c) = cumulative {
+                    self.previous.insert(cpu_key, (c, 0));
+                }
+                let memory = p.filter(|p| p.memory() > 0).map(|p| p.memory() as f64);
                 let present = p.is_some();
+                if !present
+                    && !self
+                        .reasons
+                        .iter()
+                        .any(|r| r == "process_instance_changed_or_unavailable")
+                {
+                    self.reasons
+                        .push("process_instance_changed_or_unavailable".into());
+                }
                 if self.has("cpu") {
                     self.metric(
                         &mut out,
@@ -186,7 +208,7 @@ impl Sampler {
                 }
                 if self.has("io") {
                     let current = if present {
-                        super::coverage::io(selected.pid, selected.started)
+                        super::coverage::io_exact(selected.pid, &selected.created)
                     } else {
                         None
                     };

@@ -15,27 +15,49 @@ pub fn power() -> Value {
     json!({"reason":"unsupported_platform"})
 }
 #[cfg(windows)]
-pub fn io(pid: u32, started: u64) -> Option<(u64, u64)> {
+fn native_io(pid: u32) -> Option<(u64, (u64, u64))> {
     use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::*};
     let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if h.is_null() {
         return None;
     }
     let mut counters: IO_COUNTERS = unsafe { std::mem::zeroed() };
-    let mut creation = unsafe { std::mem::zeroed() };
-    let mut exit = creation;
-    let mut kernel = creation;
-    let mut user = creation;
-    let valid =
-        unsafe { GetProcessTimes(h, &mut creation, &mut exit, &mut kernel, &mut user) } != 0;
-    let native = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
-    let matches = valid && native / 10_000_000 - 11_644_473_600 == started;
-    let ok = matches && unsafe { GetProcessIoCounters(h, &mut counters) } != 0;
+    let mut c = unsafe { std::mem::zeroed() };
+    let mut e = c;
+    let mut k = c;
+    let mut u = c;
+    let valid = unsafe { GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) } != 0;
+    let created = ((c.dwHighDateTime as u64) << 32) | c.dwLowDateTime as u64;
+    let ok = valid && unsafe { GetProcessIoCounters(h, &mut counters) } != 0;
     unsafe { CloseHandle(h) };
-    ok.then_some((counters.ReadTransferCount, counters.WriteTransferCount))
+    ok.then_some((
+        created,
+        (counters.ReadTransferCount, counters.WriteTransferCount),
+    ))
+}
+#[cfg(windows)]
+pub fn io(pid: u32, started: u64) -> Option<(u64, u64)> {
+    native_io(pid)
+        .filter(|(c, _)| {
+            c.checked_div(10_000_000)
+                .and_then(|c| c.checked_sub(11_644_473_600))
+                == Some(started)
+        })
+        .map(|(_, v)| v)
+}
+#[cfg(windows)]
+pub fn io_exact(pid: u32, created: &str) -> Option<(u64, u64)> {
+    let expected = created.parse::<u64>().ok()?;
+    native_io(pid)
+        .filter(|(c, _)| *c == expected)
+        .map(|(_, v)| v)
 }
 #[cfg(not(windows))]
 pub fn io(_: u32, _: u64) -> Option<(u64, u64)> {
+    None
+}
+#[cfg(not(windows))]
+pub fn io_exact(_: u32, _: &str) -> Option<(u64, u64)> {
     None
 }
 #[cfg(windows)]
@@ -201,10 +223,16 @@ fn fixed_query(kind: &str, cancel: &crate::core::Cancellation) -> anyhow::Result
     let script = format!("[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();{script}");
     let bytes: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let mut system_dir=[0u16;32768];
-    let len=unsafe{windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW(system_dir.as_mut_ptr(),system_dir.len() as u32)} as usize;
-    anyhow::ensure!(len>0&&len<system_dir.len(),"provider_unavailable");
-    let exe=std::path::PathBuf::from(String::from_utf16_lossy(&system_dir[..len])).join("WindowsPowerShell/v1.0/powershell.exe");
+    let mut system_dir = [0u16; 32768];
+    let len = unsafe {
+        windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW(
+            system_dir.as_mut_ptr(),
+            system_dir.len() as u32,
+        )
+    } as usize;
+    anyhow::ensure!(len > 0 && len < system_dir.len(), "provider_unavailable");
+    let exe = std::path::PathBuf::from(String::from_utf16_lossy(&system_dir[..len]))
+        .join("WindowsPowerShell/v1.0/powershell.exe");
     let mut cmd = Command::new(exe);
     cmd.args([
         "-NoLogo",
@@ -304,7 +332,7 @@ pub fn startup(args: Value, cancel: &crate::core::Cancellation) -> anyhow::Resul
         serde_json::from_value(args).map_err(|_| anyhow::anyhow!("invalid_arguments"))?;
     anyhow::ensure!(
         matches!(r.source.as_str(), "user" | "machine")
-            && (1..=50).contains(&r.limit)
+            && (1..=512).contains(&r.limit)
             && r.filter.len() <= 128
             && r.cursor.unwrap_or(0) <= 512,
         "invalid_arguments"

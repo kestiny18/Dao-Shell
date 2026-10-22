@@ -29,3 +29,5 @@ pub mod observation;
 pub mod application_actions;
 
 pub mod diagnostics;
+
+pub mod software;

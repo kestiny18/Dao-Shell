@@ -5,7 +5,9 @@ use std::{fs, path::Path};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{DirectoryGuard, identity, move_file, open_document, pin_directory};
+pub use windows::{
+    DirectoryGuard, identity, move_file, move_file_checked, open_document, pin_directory,
+};
 
 pub fn is_link(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
@@ -24,6 +26,10 @@ pub struct DirectoryGuard;
 #[cfg(not(windows))]
 pub fn pin_directory(_: &Path) -> Result<DirectoryGuard> {
     anyhow::bail!("文件修改暂只支持 Windows")
+}
+#[cfg(not(windows))]
+pub fn move_file_checked(_: &Path, _: &Path, _: &FileIdentity, _: &[u8; 32]) -> Result<()> {
+    anyhow::bail!("unsupported_platform")
 }
 #[cfg(not(windows))]
 pub fn move_file(_: &Path, _: &Path, _: &FileIdentity) -> Result<()> {

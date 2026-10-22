@@ -25,11 +25,18 @@ fn handle(file: &File) -> HANDLE {
 }
 
 fn file_handle(path: &Path, mutation: bool, directory: bool) -> Result<File> {
+    file_handle_access(path, mutation, directory, false)
+}
+fn file_handle_access(path: &Path, mutation: bool, directory: bool, content: bool) -> Result<File> {
     let path_wide = wide(path.as_os_str());
     // Attribute-only handles do not participate in all Windows share checks.
     // READ_DATA is FILE_LIST_DIRECTORY for directories and makes the delete denial effective.
     let access = FILE_READ_ATTRIBUTES
-        | if directory { FILE_READ_DATA } else { 0 }
+        | if directory || content {
+            FILE_READ_DATA
+        } else {
+            0
+        }
         | if mutation { DELETE } else { 0 };
     let share = if mutation {
         FILE_SHARE_READ
@@ -115,14 +122,43 @@ pub fn pin_directory(path: &Path) -> Result<DirectoryGuard> {
 }
 
 pub fn move_file(source: &Path, destination: &Path, expected: &FileIdentity) -> Result<()> {
+    move_file_impl(source, destination, expected, None)
+}
+/// Content and identity are checked using the same handle that performs the rename.
+pub fn move_file_checked(
+    source: &Path,
+    destination: &Path,
+    expected: &FileIdentity,
+    digest: &[u8; 32],
+) -> Result<()> {
+    move_file_impl(source, destination, expected, Some(digest))
+}
+fn move_file_impl(
+    source: &Path,
+    destination: &Path,
+    expected: &FileIdentity,
+    digest: Option<&[u8; 32]>,
+) -> Result<()> {
     let _source_parent = pin_directory(source.parent().context("源文件没有父目录")?)?;
     let _target_parent = pin_directory(destination.parent().context("目标文件没有父目录")?)?;
-    let source_handle = file_handle(source, true, false)?;
+    let source_handle = file_handle_access(source, true, false, digest.is_some())?;
     ensure!(
         &identity_of(&source_handle)? == expected,
         "源文件已变化，原方案失效"
     );
     ensure!(!expected.directory, "首版只移动普通文件");
+    if let Some(expected_digest) = digest {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        ensure!(expected.size <= 1024 * 1024, "content_budget");
+        let mut bytes = Vec::new();
+        source_handle
+            .try_clone()?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        let actual: [u8; 32] = Sha256::digest(&bytes).into();
+        ensure!(&actual == expected_digest, "content_changed");
+    }
     let parent_id = identity(destination.parent().unwrap())?;
     ensure!(parent_id.volume == expected.volume, "不支持跨卷移动");
     let name: Vec<u16> = destination.as_os_str().encode_wide().collect();

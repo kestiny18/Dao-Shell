@@ -96,7 +96,11 @@ impl Runtime {
                 serde_json::json!({"status":"error","error":if self.computer.sharing == crate::config::ComputerQuerySharing::Ask {"permission_required"} else {"permission_denied"}})
             } else {
                 ui.progress("正在查询电脑状态……");
-                match self.computer.query(name, arguments, &self.cancel) {
+                match self
+                    .computer
+                    .query_events(name, arguments, &self.cancel, &mut |value| {
+                        ui.result("diagnostic_progress", value)
+                    }) {
                     Ok(value) => value,
                     Err(error) => {
                         json!({"status":"error","error":crate::observation::error_code(&error,&self.cancel)})

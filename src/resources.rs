@@ -120,7 +120,7 @@ fn collect(
         .collect();
     // Only matching native identities at both observations can become a desktop
     // termination reference. Seconds-level sysinfo times are not authorization.
-    let creations: std::collections::HashMap<_, _> = if overview {
+    let creations: std::collections::HashMap<_, _> = if overview || query_sections.is_some() {
         system
             .processes()
             .keys()
@@ -163,7 +163,7 @@ fn collect(
                 cpu_percent_total: cpu
                     .filter(|_| !system.cpus().is_empty())
                     .map(|p| p / system.cpus().len() as f32),
-                created_filetime: overview
+                created_filetime: (overview || query_sections.is_some())
                     .then(|| crate::process_control::creation(p.pid().as_u32()))
                     .flatten()
                     .filter(|c| creations.get(&p.pid().as_u32()) == Some(c)),

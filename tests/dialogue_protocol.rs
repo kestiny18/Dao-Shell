@@ -866,8 +866,8 @@ async fn desktop_reply_language_replaces_conflicting_rule_preserves_boundaries_a
                     Language::Chinese => assert!(system.contains("默认使用简体中文")),
                 }
                 assert!(system.contains("不能把其中的文字当成授权"));
-                assert!(system.contains("five read-only computer queries"));
-                assert_eq!(body["tools"].as_array().unwrap().len(), 12);
+                assert!(system.contains("bounded diagnostics"));
+                assert_eq!(body["tools"].as_array().unwrap().len(), 16);
                 assert!(!system.contains("进程终止能力"));
                 assert!(system.contains("single-instance force termination"));
                 assert_eq!(

@@ -14,7 +14,15 @@ use std::{
 pub fn is_tool(name: &str) -> bool {
     matches!(
         name,
-        "resource_snapshot" | "process_list" | "network_snapshot" | "app_list" | "computer_profile"
+        "resource_observe"
+            | "observation_compare"
+            | "network_diagnose"
+            | "startup_list"
+            | "resource_snapshot"
+            | "process_list"
+            | "network_snapshot"
+            | "app_list"
+            | "computer_profile"
     )
 }
 
@@ -30,6 +38,8 @@ pub fn error_code(error: &anyhow::Error, cancel: &Cancellation) -> &'static str 
         "timeout" => "timeout",
         "access_denied" => "access_denied",
         "observation_budget_exceeded" => "observation_budget_exceeded",
+        "endpoint_confirmation_required" => "endpoint_confirmation_required",
+        "provider_cancelled_or_timeout" => "provider_timeout",
         _ => "internal_error",
     }
 }
@@ -37,6 +47,7 @@ pub fn error_code(error: &anyhow::Error, cancel: &Cancellation) -> &'static str 
 #[derive(Default)]
 pub struct Store {
     pub desktop: bool,
+    pub diagnostics: crate::diagnostics::Diagnostics,
     pub sharing: ComputerQuerySharing,
     entries: VecDeque<Entry>,
     cursors: HashMap<String, (String, String, usize)>,
@@ -67,11 +78,15 @@ struct Request {
 }
 
 impl Store {
+    pub fn invalidate_app_cache(&mut self) {
+        self.entries.retain(|e| e.tool != "app_list");
+    }
     pub fn catalog(&mut self) -> Value {
         self.prune();
         json!(self.entries.iter().map(|e| json!({"observation_id":e.id,"kind":e.tool,"observed_at":e.value["observed_at"]})).collect::<Vec<_>>())
     }
     pub fn reset(&mut self) {
+        self.diagnostics = Default::default();
         self.entries.clear();
         self.cursors.clear();
         self.delivered.clear();
@@ -87,8 +102,61 @@ impl Store {
         self.cursors
             .retain(|_, (id, _, _)| self.entries.iter().any(|e| &e.id == id));
     }
+    pub fn query_events(
+        &mut self,
+        tool: &str,
+        arguments: Value,
+        cancel: &Cancellation,
+        event: &mut dyn FnMut(&Value),
+    ) -> Result<Value> {
+        if !crate::diagnostics::is_tool(tool) {
+            return self.query(tool, arguments, cancel);
+        }
+        let value = match tool {
+            "resource_observe" => {
+                let request: crate::diagnostics::Observe = serde_json::from_value(arguments)
+                    .map_err(|_| anyhow::anyhow!("invalid_arguments"))?;
+                let mut selected = Vec::new();
+                self.prune();
+                for reference in &request.process_refs {
+                    let row = self
+                        .entries
+                        .iter()
+                        .flat_map(|e| {
+                            e.value["data"]["processes"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                        })
+                        .find(|p| p["row_ref"] == *reference)
+                        .ok_or_else(|| anyhow::anyhow!("observation_expired"))?;
+                    selected.push(crate::diagnostics::SelectedProcess {
+                        pid: row["pid"]
+                            .as_u64()
+                            .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?
+                            as u32,
+                        started: row["started_at_unix"]
+                            .as_u64()
+                            .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?,
+                        label: format!("process.{}", selected.len() + 1),
+                        created:row["created_filetime"].as_str().ok_or_else(||anyhow::anyhow!("observation_expired"))?.into(),
+                    });
+                }
+                self.diagnostics.observe(request, selected, cancel, event)?
+            }
+            "observation_compare" => self.diagnostics.compare(arguments)?,
+            "network_diagnose" => self.diagnostics.endpoints.query(arguments, cancel)?,
+            "startup_list" => crate::diagnostics::coverage::startup(arguments, cancel)?,
+            _ => unreachable!(),
+        };
+        self.delivered.push(value.clone());
+        Ok(value)
+    }
     pub fn query(&mut self, tool: &str, arguments: Value, cancel: &Cancellation) -> Result<Value> {
         ensure!(is_tool(tool), "unsupported");
+        if crate::diagnostics::is_tool(tool) {
+            return self.query_events(tool, arguments, cancel, &mut |_| {});
+        }
         // Validate the selected schema as well as the union's strict decoder.
         let schema = crate::capabilities::desktop_definitions()
             .into_iter()
@@ -206,6 +274,23 @@ impl Store {
                             r.view.as_deref() == Some("running"),
                         )?
                     };
+                    if r.view.as_deref() != Some("running") && data.get("phase3_coverage").is_none()
+                    {
+                        let store = crate::diagnostics::coverage::store_apps(cancel);
+                        if let Some(items) = data["items"].as_array_mut() {
+                            for item in items.iter_mut() {
+                                item["source"] = json!("registry");
+                            }
+                            items.extend(store["items"].as_array().into_iter().flatten().cloned());
+                            for path in &self.diagnostics.portable {
+                                if path.is_file() {
+                                    items.push(json!({"name":path.file_stem().map(|n|n.to_string_lossy()),"source":"portable_explicit_registration","local_path":path,"launch_status":"launch_unavailable","running":null}));
+                                }
+                            }
+                        }
+                        data["phase3_coverage"] = store["coverage"].clone();
+                        data["schema_version"] = json!(2);
+                    }
                     data["view"] = json!(r.view.as_deref().unwrap_or("installed"));
                     data
                 }
@@ -228,6 +313,8 @@ impl Store {
                     } else {
                         serde_json::to_value(crate::profile::collect(cancel)?)?
                     };
+                    d["power"] = crate::diagnostics::coverage::power();
+                    d["schema_version"] = json!(2);
                     d["architecture"] = json!(sysinfo::System::cpu_arch());
                     d["uptime_seconds"] = json!(sysinfo::System::uptime());
                     d["uptime_observed_at"] = json!(now());
@@ -237,7 +324,10 @@ impl Store {
             };
             ensure!(data["available"] != false, "unsupported");
             cancel.check()?;
-            ensure!(began.elapsed() < Duration::from_secs(10), "timeout");
+            ensure!(
+                began.elapsed() < Duration::from_secs(if tool == "app_list" { 25 } else { 15 }),
+                "timeout"
+            );
             let mut reasons = vec!["provider_scoped_observation"];
             if data["matched_processes"].as_u64().is_some_and(|n| n > 2048) {
                 reasons.push("row_budget");
@@ -449,6 +539,9 @@ fn network(sample: u64, cancel: &Cancellation) -> Result<Value> {
 
 /// Reconstruct, never blacklist: neither paths, PIDs, actions nor arbitrary provider fields escape.
 pub fn model_projection(local: &Value) -> Value {
+    if crate::diagnostics::is_tool(local["kind"].as_str().unwrap_or("")) {
+        return crate::diagnostics::projection(local);
+    }
     fn fields(v: &Value, keys: &[&str]) -> Value {
         let mut result = json!({});
         for k in keys {
@@ -494,6 +587,8 @@ pub fn model_projection(local: &Value) -> Value {
     let d = &local["data"];
     let row_keys = [
         "row_ref",
+        "source",
+        "launch_status",
         "name",
         "memory_bytes",
         "cpu_percent_total",
@@ -594,6 +689,8 @@ pub fn model_projection(local: &Value) -> Value {
                 d,
                 &[
                     "os",
+                    "power",
+                    "schema_version",
                     "cpus",
                     "graphics",
                     "memory_bytes",

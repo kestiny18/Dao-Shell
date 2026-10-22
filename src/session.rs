@@ -44,6 +44,7 @@ pub enum Action {
     ActionReceipts,
     ReconcileAction(String),
     ClearCompletedActions,
+    DiagnosticLocal(serde_json::Value),
     QueryComputer {
         tool: String,
         arguments: serde_json::Value,
@@ -272,6 +273,51 @@ impl FileSession {
                 let dialogue = self.dialogue.as_mut().ok_or_else(|| anyhow::anyhow!(self.language.choose("自然语言需要连接模型；请在设置连接模型，或使用文件名搜索/查看电脑状态。", "Natural language requires a model. Connect one in Settings, or use file-name search / local computer status.")))?;
                 dialogue.turn(&input, &mut self.runtime, ui).await
             }
+            Action::DiagnosticLocal(args) => {
+                let value = match args["kind"].as_str() {
+                    Some("endpoint_register") => self
+                        .runtime
+                        .computer
+                        .diagnostics
+                        .endpoints
+                        .register(args["arguments"].clone())?,
+                    Some("portable_register") => {
+                        let path = std::path::PathBuf::from(
+                            args["path"]
+                                .as_str()
+                                .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?,
+                        );
+                        let path = self.runtime.scope.check(&path, false)?;
+                        ensure!(
+                            path.is_file()
+                                && path
+                                    .extension()
+                                    .is_some_and(|e| e.eq_ignore_ascii_case("exe")),
+                            "invalid_arguments"
+                        );
+                        ensure!(
+                            self.runtime.computer.diagnostics.portable.len() < 32,
+                            "portable_budget"
+                        );
+                        self.runtime
+                            .computer
+                            .diagnostics
+                            .portable
+                            .push(path.clone());
+                        self.runtime.computer.invalidate_app_cache();
+                        json!({"status":"registered","path":path,"discovery_only":true})
+                    }
+                    _ => anyhow::bail!("unsupported"),
+                };
+                ui.result("diagnostic_local", &value);
+                Ok(self
+                    .language
+                    .choose(
+                        "本地登记已完成；未发起网络请求或启动应用。",
+                        "Local registration complete; no network request or application launch.",
+                    )
+                    .into())
+            }
             Action::QueryComputer { tool, arguments } => {
                 ui.progress(
                     self.language
@@ -280,7 +326,9 @@ impl FileSession {
                 let value = self
                     .runtime
                     .computer
-                    .query(&tool, arguments, &self.runtime.cancel)
+                    .query_events(&tool, arguments, &self.runtime.cancel, &mut |value| {
+                        ui.result("diagnostic_progress", value)
+                    })
                     .map_err(|e| {
                         anyhow::anyhow!(crate::observation::error_code(&e, &self.runtime.cancel))
                     })?;

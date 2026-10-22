@@ -182,7 +182,13 @@ impl Diagnostics {
                 .iter()
                 .collect::<std::collections::HashSet<_>>()
                 .len()
-                == request.domains.len(),
+                == request.domains.len()
+                && request
+                    .process_refs
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    == request.process_refs.len(),
             "invalid_arguments"
         );
         self.prune();
@@ -213,7 +219,8 @@ impl Diagnostics {
                 break;
             }
             let elapsed = start.elapsed();
-            if elapsed > due + interval {
+            let (missed_slot, gap) = slot_state(elapsed, due, previous, interval, slot > 0);
+            if missed_slot {
                 missed += 1;
                 points.push(json!({"elapsed_ms":due.as_millis(),"values":{},"unknown_reason":"missed_sampling_slot"}));
                 continue;
@@ -223,7 +230,7 @@ impl Diagnostics {
                 .elapsed()
                 .map(|d| (d.as_secs_f64() - seconds).abs() > 1.)
                 .unwrap_or(true);
-            let gap = slot > 0 && (seconds - previous) > interval.as_secs_f64() * 1.75;
+
             let point_start = Instant::now();
             let mut values = if late {
                 BTreeMap::new()
@@ -302,9 +309,21 @@ impl Diagnostics {
             comparisons[key] = json!({"status":if !compatible{"incompatible_definition_or_identity"}else if !sufficient{"insufficient_samples"}else{"comparable"},"left":a,"right":b,"mean_delta":if compatible&&sufficient {a["time_weighted_mean"].as_f64().zip(b["time_weighted_mean"].as_f64()).map(|(a,b)|b-a)}else{None}});
         }
         Ok(
-            json!({"schema_version":2,"observation_id":uuid::Uuid::new_v4().to_string(),"kind":"observation_compare","status":"complete","observed_at":now(),"data":{"left_id":r.left_id,"right_id":r.right_id,"left_window":left["sample_window"],"right_window":right["sample_window"],"comparisons":comparisons},"limits":"Only matching metric definitions and identities are compared; different durations remain explicit."}),
+            json!({"schema_version":2,"observation_id":uuid::Uuid::new_v4().to_string(),"kind":"observation_compare","status":"complete","observed_at":now(),"data":{"left_id":r.left_id,"right_id":r.right_id,"left_window":left["sample_window"],"right_window":right["sample_window"],"metric_definitions":left["data"]["metric_definitions"].as_object().map(|defs|defs.iter().map(|(key,def)|(key.clone(),json!({"unit":def["unit"],"label_key":def["label_key"]}))).collect::<serde_json::Map<_,_>>()),"comparisons":comparisons},"limits":"Only matching metric definitions and identities are compared; different durations remain explicit."}),
         )
     }
+}
+fn slot_state(
+    elapsed: Duration,
+    due: Duration,
+    previous: f64,
+    interval: Duration,
+    has_previous: bool,
+) -> (bool, bool) {
+    (
+        elapsed > due + interval,
+        has_previous && elapsed.as_secs_f64() - previous > interval.as_secs_f64() * 1.75,
+    )
 }
 /// Every interval belongs to its ending reading. Gaps contribute neither weight nor normal time.
 pub fn summarize(points: &[Value], defs: &Value, interval_ms: u64) -> Value {
@@ -376,12 +395,12 @@ pub fn projection(local: &Value) -> Value {
             out["data"]["statistics_are_local_deterministic"] = json!(true);
             // Summary rows take priority over representative points within the model budget.
             let mut omitted = 0usize;
-            while out.to_string().len() > 32 * 1024 {
-                if let Some(rows) = out["data"]["representative_points"].as_array_mut() {
-                    if !rows.is_empty() {
-                        rows.pop();
-                        continue;
-                    }
+            while out.to_string().len() > 31 * 1024 {
+                if let Some(rows) = out["data"]["representative_points"].as_array_mut()
+                    && !rows.is_empty()
+                {
+                    rows.pop();
+                    continue;
                 }
                 let key = out["data"]["summary"]
                     .as_object()
@@ -504,6 +523,67 @@ mod tests {
         assert!(
             d.observe(invalid, vec![], &Cancellation::default(), &mut |_| {})
                 .is_err()
+        );
+    }
+    #[test]
+    fn virtual_schedule_marks_missed_and_sleep_gaps_and_enforces_bytes() {
+        let interval = Duration::from_secs(1);
+        assert_eq!(
+            slot_state(Duration::from_millis(1020), interval, 0., interval, true),
+            (false, false)
+        );
+        assert_eq!(
+            slot_state(Duration::from_secs(20), interval, 0., interval, true),
+            (true, true)
+        );
+        assert_eq!(
+            slot_state(
+                Duration::from_secs(20),
+                Duration::from_secs(20),
+                1.,
+                interval,
+                true
+            ),
+            (false, true)
+        );
+        let mut d = Diagnostics::default();
+        d.series
+            .push_back((Instant::now(), json!({"large":"x".repeat(8*1024*1024+1)})));
+        d.prune();
+        assert!(d.series.is_empty());
+    }
+    #[test]
+    fn startup_projection_strips_injection_strings_and_limits_names() {
+        let p = projection(
+            &json!({"kind":"startup_list","data":{"items":[{"name":"a".repeat(16000),"source":"user_run","command":"PRIVATE.exe --key=secret","path":"C:/private/user"}]}}),
+        );
+        assert!(!p.to_string().contains("PRIVATE"));
+        assert!(!p.to_string().contains("C:/private"));
+        assert!(p.to_string().len() < 1024);
+    }
+    #[test]
+    fn startup_cursor_binds_snapshot_filter_and_session() {
+        let mut d = Diagnostics::default();
+        d.series.push_back((Instant::now(),json!({"kind":"startup_list","observation_id":"stable","data":{"items":[{"name":"first"},{"name":"second"}]}})));
+        d.startup_cursors.insert(
+            "opaque".into(),
+            ("stable".into(), json!(["user", "", 1]).to_string(), 1),
+        );
+        let args = json!({"source":"user","limit":1,"cursor":"opaque"});
+        let value = d.startup(args.clone(), &Cancellation::default()).unwrap();
+        assert_eq!(value["observation_id"], "stable");
+        assert_eq!(value["data"]["items"][0]["name"], "second");
+        assert!(
+            Diagnostics::default()
+                .startup(args, &Cancellation::default())
+                .is_err()
+        );
+        assert!(
+            d.startup(
+                json!({"source":"user","filter":"changed","limit":1,"cursor":"opaque"}),
+                &Cancellation::default()
+            )
+            .is_err()
         );
     }
     #[test]

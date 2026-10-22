@@ -157,6 +157,7 @@ function renderCurrent() {
   candidates(st?.items || []);
   if(typeof renderApplicationActions==='function') renderApplicationActions(st);
   if (typeof renderObservations === "function") renderObservations(st?.observations || []);
+  if (typeof renderDiagnostics === "function") renderDiagnostics();
   $('input').value = s?.draft ?? (currentPage === 'home' ? workspace.home_draft : '');
   renderedTab = workspace.active;
   $('activity').textContent = builtinText(st?.activity) || (activeRequest ? t('app.another_session_is_running_you_can_switch_to_it_or_stop_it') : t('app.ready'));
@@ -192,7 +193,7 @@ function message(text, role = 'assistant', error = false, id = workspace.active)
 }
 function closeConfirmation(id = workspace.active) { if (runtime.has(id)) {state(id).confirmation = null;state(id).appConfirmation=null;} if (workspace.active === id) $('confirmation').hidden = true; }
 function invalidateContexts() {
-  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.observations = []; st.actionTargets=null;st.actionReceipts=[];st.appConfirmation=null;st.confirmation = null; st.contextLost = true; }
+  for (const s of workspace.sessions) { const st = state(s.id); st.items = []; st.observations = [];st.diagnosticProgress=null;st.diagnosticEndpoint=null; st.actionTargets=null;st.actionReceipts=[];st.appConfirmation=null;st.confirmation = null; st.contextLost = true; }
   renderCurrent();
 }
 function applySearchReceipt(value,request) {
@@ -220,9 +221,12 @@ function onEvent(event, request) {
   if (event.kind === 'progress') st.activity = localBuiltin(event.text);
   if (event.kind === 'context_reset') {
     for (const item of event.configuration_changed ? workspace.sessions : [session(request.sessionId)]) {
-      const previous = state(item.id); previous.items = []; previous.observations = []; previous.actionTargets=null;previous.appConfirmation=null;previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
+      const previous = state(item.id); previous.items = []; previous.observations = [];s.diagnosticProgress=null;s.diagnosticEndpoint=null; previous.diagnosticProgress=null;previous.diagnosticEndpoint=null; previous.actionTargets=null;previous.appConfirmation=null;previous.contextLost = item.messages.length > (item.id === request.sessionId ? 1 : 0);
     }
   }
+  if(event.kind==='result' && event.capability==='diagnostic_progress') diagnosticProgress(event.value,request);
+  if(event.kind==='result' && event.capability==='diagnostic_local' && event.value?.endpoint_ref && !request.stopping) st.diagnosticEndpoint=event.value;
+  if(event.kind==='result' && diagnosticTools.includes(event.capability)) { if(event.capability==='resource_observe') st.diagnosticProgress=null; applyObservation(event.value,request); }
   if(event.kind==='action_prepared' && !request.stopping) st.appConfirmation={...event,executionId:request.id};
   if(event.kind==='confirmation_closed' && st.appConfirmation?.request_id===event.request_id) st.appConfirmation=null;
   if(event.kind==='result' && ['app_targets','app_launch','app_close','process_terminate'].includes(event.capability) && ['permission_required','permission_denied'].includes(event.value?.error)) applyObservation(event.value,request);

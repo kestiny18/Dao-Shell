@@ -123,6 +123,10 @@ async fn file_entry_rejects_model_tools_outside_its_profile() {
                 "network_snapshot",
                 "app_list",
                 "computer_profile",
+                "resource_observe",
+                "observation_compare",
+                "network_diagnose",
+                "startup_list",
                 "app_targets",
                 "app_launch",
                 "app_close",
@@ -908,6 +912,151 @@ async fn desktop_reply_language_replaces_conflicting_rule_preserves_boundaries_a
             .unwrap();
         assert_eq!(ui.confirmations, 0);
         assert!(ui.results.is_empty());
+        server.join().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_cancel_preserves_summary_and_never_calls_model_again() {
+    struct StopOnSample {
+        ui: Ui,
+        cancel: Cancellation,
+    }
+    impl Interaction for StopOnSample {
+        fn confirm_move(&mut self, _: &Operation) -> anyhow::Result<bool> {
+            panic!("no action")
+        }
+        fn confirm_open(&mut self, _: &FileObject) -> anyhow::Result<bool> {
+            panic!("no action")
+        }
+        fn progress(&mut self, _: &str) {}
+        fn result(&mut self, name: &str, value: &Value) {
+            self.ui.result(name, value);
+            if name == "diagnostic_progress" {
+                self.cancel.cancel();
+            }
+        }
+    }
+    let (_temp, mut runtime) = setup();
+    runtime.computer.desktop = true;
+    runtime.computer.sharing = dao_shell::config::ComputerQuerySharing::Enabled;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request(&mut stream);
+        respond(
+            &mut stream,
+            call(
+                "observe",
+                "resource_observe",
+                json!({"domains":["cpu","memory"],"duration_s":30}),
+            ),
+        );
+        listener.set_nonblocking(true).unwrap();
+        thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    });
+    let mut ui = StopOnSample {
+        ui: Ui::default(),
+        cancel: runtime.cancel.clone(),
+    };
+    let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    assert!(
+        dialogue
+            .turn("Observe then stop", &mut runtime, &mut ui)
+            .await
+            .is_err()
+    );
+    let value = &ui
+        .ui
+        .results
+        .iter()
+        .find(|(n, _)| n == "resource_observe")
+        .unwrap()
+        .1;
+    assert_eq!(value["status"], "stopped");
+    assert_eq!(value["data"]["series"].as_array().unwrap().len(), 1);
+    assert_eq!(runtime.computer.delivered.len(), 1);
+    server.join().unwrap();
+}
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_model_cannot_register_endpoint_or_invent_network_authorization() {
+    let (_temp, mut runtime) = setup();
+    runtime.computer.desktop = true;
+    runtime.computer.sharing = dao_shell::config::ComputerQuerySharing::Enabled;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let model = config(listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        request(&mut s);
+        respond(
+            &mut s,
+            call(
+                "probe",
+                "network_diagnose",
+                json!({"mode":"probe","endpoint_refs":["invented"],"checks":["tcp"]}),
+            ),
+        );
+        let (mut s, _) = listener.accept().unwrap();
+        let body = request(&mut s);
+        let result: Value = serde_json::from_str(
+            body["messages"].as_array().unwrap().last().unwrap()["content"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result["error"], "endpoint_confirmation_required");
+        respond(
+            &mut s,
+            json!({"role":"assistant","content":"Local target confirmation required; no request sent."}),
+        );
+    });
+    let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    let mut ui = Ui::default();
+    dialogue
+        .turn("Check network", &mut runtime, &mut ui)
+        .await
+        .unwrap();
+    assert_eq!(ui.confirmations, 0);
+    server.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostic_summary_explanation_is_one_request_with_no_tools() {
+    for malicious in [false, true] {
+        let (_temp, runtime) = setup();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let model = config(listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = request(&mut stream);
+            assert_eq!(body["tools"], json!([]));
+            assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+            respond(
+                &mut stream,
+                if malicious {
+                    call(
+                        "forged",
+                        "app_launch",
+                        json!({"target_ref":"not-authorized"}),
+                    )
+                } else {
+                    json!({"role":"assistant","content":"One summary explanation."})
+                },
+            );
+        });
+        let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+        let result = dialogue
+            .explain_observation(
+                &json!({"kind":"resource_observe","data":{"summary":{"cpu.percent":{"max":30}}}}),
+                &Cancellation::default(),
+            )
+            .await;
+        assert_eq!(result.is_err(), malicious);
         server.join().unwrap();
     }
 }

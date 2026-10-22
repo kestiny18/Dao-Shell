@@ -1,6 +1,6 @@
 /* Cards are transient; workspace messages contain only visible text receipts. */
 const computerTools = ['resource_snapshot','process_list','network_snapshot','app_list','computer_profile'];
-const computerTitle = tool => t(['computer.resources','computer.processes','computer.network','computer.apps','computer.profile'][computerTools.indexOf(tool)] || 'computer.local');
+const computerTitle = tool => typeof diagnosticTools!=='undefined'&&diagnosticTools.includes(tool) ? t(`diagnostics.tool.${tool}`) : t(['computer.resources','computer.processes','computer.network','computer.apps','computer.profile'][computerTools.indexOf(tool)] || 'computer.local');
 const computerValue = v => v === null || v === undefined ? t('computer.unknown') : String(v);
 const computerBytes = n => typeof n === 'number' ? `${(n / 1073741824).toFixed(2)} GiB` : t('computer.unknown');
 const computerPercent = n => typeof n === 'number' ? `${n.toFixed(1)}%` : t('computer.unknown');
@@ -8,6 +8,7 @@ function computerLimits(value) { return t(value.kind === 'app_list' ? 'computer.
 function computerStatus(code) { const key=`computer.status.${code}`; return Object.hasOwn(messages,key) ? t(key) : computerValue(code); }
 function computerCoverageReason(reason) { const key=`computer.reason.${reason}`; return Object.hasOwn(messages,key) ? t(key) : String(reason); }
 function observationLines(v) {
+  if(typeof diagnosticTools!=='undefined'&&diagnosticTools.includes(v.kind))return diagnosticLines(v);
   const d = v.data || {}, lines = [];
   const row = (p,i) => `${i+1+(v.kind==='process_list' ? (v.page?.offset || 0) : 0)} ${p.name || ''} · ${computerBytes(p.memory_bytes)} · CPU ${computerPercent(p.cpu_percent_total)}`;
   if (v.kind === 'resource_snapshot') {
@@ -18,9 +19,10 @@ function observationLines(v) {
     for (const sort of ['memory','cpu']) { if (d.process_rankings?.[sort]?.length) lines.push(`${sort.toUpperCase()} ↓`, ...d.process_rankings[sort].map(row)); }
   }
   if (v.kind === 'process_list') lines.push(...(d.processes || []).map(row));
-  if (v.kind === 'app_list') lines.push(...(d.items || []).map((p,i) => `${i+1+(v.page?.offset || 0)} ${p.name || ''} · ${computerValue(p.version)} · ${computerValue(p.publisher)} · ${computerBytes(p.estimated_size_bytes)} · ${p.running === true ? t('computer.running') : t('computer.unknown')}`));
+  if (v.kind === 'app_list') lines.push(...(d.items || []).map((p,i) => `${i+1+(v.page?.offset || 0)} ${p.name || ''} · ${p.source||'registry'} · ${p.launch_status||''} · ${computerValue(p.version)} · ${computerValue(p.publisher)} · ${computerBytes(p.estimated_size_bytes)} · ${p.running === true ? t('computer.running') : t('computer.unknown')}`));
   if (v.kind === 'network_snapshot') lines.push(...(d.adapters || []).map(p => `${p.label} (${p.name || ''}) · IP ${computerValue(p.has_ip)} · ↓ ${typeof p.received_bytes_per_second === 'number' ? p.received_bytes_per_second.toFixed(0) : t('computer.unknown')} B/s · ↑ ${typeof p.transmitted_bytes_per_second === 'number' ? p.transmitted_bytes_per_second.toFixed(0) : t('computer.unknown')} B/s`));
   if (v.kind === 'computer_profile') lines.push(computerValue(d.os), ...(d.cpus || []), computerBytes(d.memory_bytes), ...(d.graphics || []), computerValue(d.architecture), `${computerValue(d.uptime_seconds)} s (${d.uptime_observed_at || ''})`);
+  if(v.kind==='computer_profile'&&d.power)lines.push(`Power · AC ${computerValue(d.power.ac_online)} · Battery ${computerValue(d.power.battery_present)} · ${computerValue(d.power.percent)}% · ${computerValue(d.power.estimated_remaining_seconds)} s · ${d.power.reason||''}`);
   if (v.page) lines.push(`${v.page.returned} / ${v.page.matched}`);
   return lines;
 }
@@ -35,6 +37,8 @@ function applyObservation(value, request) {
     const index = st.observations.findIndex(v => v.observation_id === value.observation_id);
     if (index >= 0) st.observations.splice(index,1);
     st.observations.push(value); st.observations = st.observations.slice(-12);
+    let seriesCount=0;st.observations=st.observations.reverse().filter(v=>v.kind!=='resource_observe'||++seriesCount<=4).reverse();
+    while(st.observations.length&&new TextEncoder().encode(JSON.stringify(st.observations)).length>16*1024*1024)st.observations.shift();
     message(`${computerTitle(value.kind)} · ${localDate(value.observed_at)}\n${observationLines(value).join('\n')}\n${t('computer.scope')}\n${t('computer.history')}`,'receipt',false,request.sessionId);
   } else if (value.error) {
     st.observations.push(value);
@@ -62,7 +66,7 @@ async function ensureComputerSharing() {
 }
 function renderObservations(values) {
   const target = $('computer-observations'); target.replaceChildren();
-  for (const value of values) {
+  for (const value of values.filter(v=>typeof diagnosticTools==='undefined'||!diagnosticTools.includes(v.kind))) {
     const card = document.createElement('details'); card.className = 'card computer-observation'; card.open = true;
     const title = document.createElement('summary'); title.textContent = value.error ? t(['permission_required','permission_denied'].includes(value.error) ? `computer.${value.error}` : 'computer.error') : `${computerTitle(value.kind)} · ${localDate(value.observed_at)}${value.cached ? ` · ${t('computer.cached')}` : ''}`;
     card.append(title);

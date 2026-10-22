@@ -36,7 +36,7 @@ impl Sampler {
         };
         if domains.iter().any(|d| d == "network") {
             result.networks.refresh(true);
-            result.network_names = result.networks.iter().map(|(n, _)| n.clone()).collect();
+            result.network_names = result.networks.keys().cloned().collect();
             result.network_names.sort();
             if result.network_names.len() > 8 {
                 result.reasons.push("interface_budget".into());
@@ -57,7 +57,7 @@ impl Sampler {
         semantics: &str,
         identity: Option<String>,
     ) {
-        self.definitions.entry(key.clone()).or_insert_with(||json!({"unit":unit,"semantics":semantics,"local_identity":identity,"high_threshold":if unit=="percent"{Some(80.)}else{None}}));
+        self.definitions.entry(key.clone()).or_insert_with(||json!({"label_key":if key.starts_with("cpu."){"diagnostics.metric_cpu"}else if key.starts_with("memory."){"computer.memory"}else if key.starts_with("network."){"diagnostics.interface"}else if key.starts_with("process."){"diagnostics.process"}else if key.starts_with("power.ac"){"diagnostics.ac"}else if key.starts_with("power."){"diagnostics.battery"}else if unit=="percent"{"diagnostics.engine"}else if unit=="dedicated_bytes"{"diagnostics.dedicated"}else{"diagnostics.shared"},"unit":unit,"semantics":semantics,"local_identity":identity,"high_threshold":if unit=="percent"{Some(80.)}else{None}}));
         out.insert(key, json!(value));
     }
     pub fn sample(&mut self, seconds: f64, reset: bool) -> BTreeMap<String, Value> {
@@ -269,10 +269,10 @@ impl Sampler {
                 "system AC status point reading",
                 None,
             );
-            if let Some(reason) = p["reason"].as_str() {
-                if !self.reasons.iter().any(|r| r == reason) {
-                    self.reasons.push(reason.into());
-                }
+            if let Some(reason) = p["reason"].as_str()
+                && !self.reasons.iter().any(|r| r == reason)
+            {
+                self.reasons.push(reason.into());
             }
         }
         if self.has("gpu") {

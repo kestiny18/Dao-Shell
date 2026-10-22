@@ -503,6 +503,19 @@ impl Store {
             value["data"]["facts_for_explanation"] =
                 crate::resources::explanation_facts(&value["data"]);
         }
+        // Precise creation is collector-internal identity, not a public row/action credential.
+        if let Some(rows) = value["data"]["processes"].as_array_mut() {
+            for row in rows {
+                row.as_object_mut().unwrap().remove("created_filetime");
+            }
+        }
+        for sort in ["cpu", "memory"] {
+            if let Some(rows) = value["data"]["process_rankings"][sort].as_array_mut() {
+                for row in rows {
+                    row.as_object_mut().unwrap().remove("created_filetime");
+                }
+            }
+        }
         value["query"] = json!({"tool":tool,"arguments":local_arguments});
         self.delivered.push(value.clone());
         Ok(value)

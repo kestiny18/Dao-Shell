@@ -48,7 +48,7 @@ async function fixture(options = {}) {
     if (command === 'cancel') { if (!options.deferCancel) pending?.({message:'本轮已取消',error:true,items:[]}); return; }
     throw Error(`Unexpected command ${command}`);
   } } };
-  for (const script of ['i18n.js','app.js','computer-query.js','application-actions.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
+  for (const script of ['i18n.js','app.js','computer-query.js','application-actions.js','diagnostics.js','layout.js','settings.js','home.js']) new Script(await readFile(new URL(`../ui/${script}`, import.meta.url), 'utf8'), { filename:script }).runInContext(dom.getInternalVMContext());
   const tick = async () => { for(let i=0;i<5;i++) await new Promise((resolve) => setTimeout(resolve,0)); };
   await tick();
   const $ = (id) => w.document.getElementById(id);
@@ -940,3 +940,20 @@ test('English count labels avoid singular-plural errors and explain manual langu
   const note=f.w.t('language.note');assert.match(note,/When following system/);assert.match(note,/manual choice takes priority/);
   for(const count of [0,1,2])assert.equal(f.w.t('home.value_records_206',{v0:count}),`Records: ${count}`);
 });
+
+ test('diagnostic stop retains final samples but rejects late progress and never saves native details',async(t)=>{
+ let complete,emitRequest;
+ const v={kind:'resource_observe',observation_id:'series-one',observed_at:'2026-10-22T10:00:00Z',status:'stopped',sample_window:{elapsed_ms:1000},data:{series:[{elapsed_ms:0,values:{'cpu.percent':20}},{elapsed_ms:1000,values:{'cpu.percent':80}}],metric_definitions:{'cpu.percent':{unit:'percent',local_identity:'private-native-identity'}},summary:{'cpu.percent':{valid_points:2,missing_points:0,min:20,max:80,time_weighted_mean:80,high_duration_ms:1000}}}};
+ const f=await fixture({perform:async(args,emit)=>{emitRequest=emit;emit({kind:'result',capability:'diagnostic_progress',value:{observation_id:'series-one',duration_s:30,elapsed_ms:0,point:v.data.series[0],metric_definitions:v.data.metric_definitions}});return new Promise(resolve=>complete=resolve);}});t.after(()=>f.dom.window.close());
+ const pending=f.w.run('computer',JSON.stringify({tool:'resource_observe',arguments:{domains:['cpu'],duration_s:30}}));await f.tick();assert.match(f.$('diagnostic-results').textContent,/观察中/);
+ const stopping=f.w.stopRequest();await f.tick();emitRequest({kind:'result',capability:'diagnostic_progress',value:{observation_id:'series-one',elapsed_ms:9000,point:{elapsed_ms:9000,values:{'cpu.percent':100}}}});
+ assert.equal(f.w.eval('state(session().id).diagnosticProgress.points.length'),1);
+ emitRequest({kind:'result',capability:'resource_observe',value:v});complete({message:'Stopped',error:false,items:[],observations:[v]});await pending;await stopping;await f.tick();assert.match(f.$('diagnostic-results').textContent,/已停止|Stopped/);assert.equal(f.w.eval('state(session().id).diagnosticProgress'),null);assert.equal(f.w.eval('state(session().id).observations.length'),1);assert(!JSON.stringify(f.saved()).includes('private-native-identity'));
+ });
+ test('endpoint registration requires local checkbox and startup command text stays outside saved history',async(t)=>{
+ const v={kind:'startup_list',observation_id:'startup-one',observed_at:'2026-10-22T10:00:00Z',status:'complete',data:{items:[{name:'Fixture <img src=x>',command:'SECRET_COMMAND.exe /private',source:'user_run'}]}};
+ const f=await fixture({perform:async(args,emit)=>{if(args.kind==='diagnostic-local'){emit({kind:'result',capability:'diagnostic_local',value:{endpoint_ref:'local-ref',host:'private.internal',port:443,scope:'local',checks:['dns','tcp','https']}});return {message:'Registered',error:false,items:[]};}emit({kind:'result',capability:'startup_list',value:v});return {message:'Read',error:false,items:[],observations:[v]};}});t.after(()=>f.dom.window.close());
+ f.$('diagnostic-host').value='private.internal';f.$('diagnostic-register').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').length,0);
+ f.$('diagnostic-confirm-target').checked=true;f.$('diagnostic-register').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').length,1);assert.match(f.$('diagnostic-approved').textContent,/private.internal/);assert.equal(f.$('diagnostic-confirm-target').checked,false);
+ await f.w.run('computer',JSON.stringify({tool:'startup_list',arguments:{source:'user'}}));await f.tick();assert.match(f.$('diagnostic-results').textContent,/SECRET_COMMAND/);assert.equal(f.$('diagnostic-results').querySelector('img'),null);const saved=JSON.stringify(f.saved());assert(!saved.includes('SECRET_COMMAND'));assert(!saved.includes('private.internal'));
+ });

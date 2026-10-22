@@ -329,6 +329,10 @@ impl Bridge {
             "action-receipts" => Action::ActionReceipts,
             "reconcile-action" => Action::ReconcileAction(input),
             "clear-completed-actions" => Action::ClearCompletedActions,
+            "diagnostic-explain" => Action::ExplainDiagnostic(input),
+            "diagnostic-local" => Action::DiagnosticLocal(
+                serde_json::from_str(&input).map_err(|_| "invalid_arguments")?,
+            ),
             "computer" => {
                 let value: Value = serde_json::from_str(&input).map_err(|_| "invalid_arguments")?;
                 Action::QueryComputer {

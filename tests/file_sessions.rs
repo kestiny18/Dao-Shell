@@ -262,3 +262,42 @@ async fn english_match_counts_are_clear_for_zero_one_and_multiple_without_changi
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn portable_registration_is_local_discovery_only_and_cannot_expand_scope() {
+    use serde_json::json;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("Owned.exe"), b"synthetic inert fixture").unwrap();
+    fs::write(outside.path().join("Outside.exe"), b"inert").unwrap();
+    let mut session = FileSession::new(
+        &Config {
+            read_roots: vec![root.path().into()],
+            ..Default::default()
+        },
+        Cancellation::default(),
+    )
+    .unwrap();
+    let mut ui = Ui::default();
+    let denied = session
+        .execute(
+            Action::DiagnosticLocal(
+                json!({"kind":"portable_register","path":outside.path().join("Outside.exe")}),
+            ),
+            &mut ui,
+        )
+        .await;
+    assert!(denied.error);
+    let accepted = session
+        .execute(
+            Action::DiagnosticLocal(
+                json!({"kind":"portable_register","path":root.path().join("Owned.exe")}),
+            ),
+            &mut ui,
+        )
+        .await;
+    assert!(!accepted.error);
+    assert_eq!(ui.confirmations, 0);
+    assert!(accepted.action_targets.is_empty());
+    assert!(accepted.action_receipts.is_empty());
+}

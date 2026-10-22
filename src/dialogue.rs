@@ -127,6 +127,36 @@ impl Dialogue {
         }
         Ok(())
     }
+    /// The explicit local summary button makes one request with no executable tools.
+    pub async fn explain_observation(
+        &mut self,
+        snapshot: &Value,
+        cancel: &crate::core::Cancellation,
+    ) -> Result<String> {
+        cancel.check()?;
+        let messages = vec![
+            json!({"role":"system","content":self.response_language.choose("仅解释提供的本地确定性观测摘要。使用简体中文，区分观测、相关性和假设；保留时间、口径和缺失。不调用工具，不准备动作。","Explain only the supplied deterministic local observation summary in English. Distinguish observations, correlation and hypotheses; preserve time, units and missing data. No tools or actions.")}),
+            json!({"role":"user","content":snapshot.to_string()}),
+        ];
+        let (response, _) = self.client.request(&messages, json!([]), cancel).await?;
+        cancel.check()?;
+        ensure!(
+            response.tool_calls.is_empty(),
+            "explanation_tools_not_allowed"
+        );
+        let text = response.content.unwrap_or_else(|| {
+            self.response_language
+                .choose(
+                    "模型没有返回解释；本地观测仍保留。",
+                    "No explanation returned; the local observation remains available.",
+                )
+                .into()
+        });
+        self.observe_local("resource_observe", snapshot);
+        self.messages
+            .push(json!({"role":"assistant","content":text}));
+        Ok(text)
+    }
     pub async fn turn(
         &mut self,
         input: &str,

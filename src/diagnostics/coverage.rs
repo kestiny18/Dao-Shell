@@ -7,8 +7,16 @@ pub fn power() -> Value {
     if unsafe { GetSystemPowerStatus(&mut s) } == 0 {
         return json!({"reason":"power_unavailable"});
     }
-    let absent = s.BatteryFlag != 255 && s.BatteryFlag & 128 != 0;
-    json!({"ac_online":match s.ACLineStatus{0=>Some(false),1=>Some(true),_=>None},"battery_present":if s.BatteryFlag==255{None}else{Some(!absent)},"percent":if absent||s.BatteryLifePercent==255{None}else{Some(s.BatteryLifePercent)},"estimated_remaining_seconds":if absent||s.BatteryLifeTime==u32::MAX{None}else{Some(s.BatteryLifeTime)},"reason":if absent{Some("battery_not_applicable")}else{None}})
+    decode_power(
+        s.ACLineStatus,
+        s.BatteryFlag,
+        s.BatteryLifePercent,
+        s.BatteryLifeTime,
+    )
+}
+fn decode_power(ac: u8, flags: u8, percent: u8, remaining: u32) -> Value {
+    let absent = flags != 255 && flags & 128 != 0;
+    json!({"ac_online":match ac{0=>Some(false),1=>Some(true),_=>None},"battery_present":if flags==255{None}else{Some(!absent)},"percent":if absent||percent==255{None}else{Some(percent)},"estimated_remaining_seconds":if absent||remaining==u32::MAX{None}else{Some(remaining)},"reason":if flags==255{Some("battery_status_unknown")}else if absent{Some("battery_not_applicable")}else{None}})
 }
 #[cfg(not(windows))]
 pub fn power() -> Value {
@@ -363,4 +371,35 @@ pub fn startup(args: Value, cancel: &crate::core::Cancellation) -> anyhow::Resul
     Ok(
         json!({"schema_version":2,"observation_id":uuid::Uuid::new_v4().to_string(),"kind":"startup_list","observed_at":crate::core::now(),"status":if partial{"partial"}else{"complete"},"data":{"items":items,"count":count,"page":{"next_cursor":next}},"coverage":{"state":if partial{"partial"}else{"provider_scoped"},"reasons":["Run/RunOnce and Startup folders only; registration is not proof of enabled state; values never executed"]},"limits":"Command strings and shortcut paths remain local, never model/workspace text. Services and scheduled tasks are outside scope."}),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn owned_process_io_requires_exact_creation_and_reads_fixture_only() {
+        use std::io::Write;
+        let pid = std::process::id();
+        let created = crate::process_control::creation(pid).unwrap();
+        let before = io_exact(pid, &created).unwrap();
+        assert!(io_exact(pid, "0").is_none());
+        let mut fixture = tempfile::tempfile().unwrap();
+        fixture.write_all(&[42; 65536]).unwrap();
+        fixture.flush().unwrap();
+        let after = io_exact(pid, &created).unwrap();
+        assert!(after.0 >= before.0 && after.1 >= before.1);
+    }
+    #[test]
+    fn battery_absent_unknown_and_unknown_estimate_are_distinct() {
+        let absent = decode_power(1, 128, 255, u32::MAX);
+        assert_eq!(absent["battery_present"], false);
+        assert!(absent["percent"].is_null());
+        let unknown = decode_power(255, 255, 255, u32::MAX);
+        assert!(unknown["battery_present"].is_null());
+        assert_eq!(unknown["reason"], "battery_status_unknown");
+        let present = decode_power(1, 8, 100, u32::MAX);
+        assert_eq!(present["percent"], 100);
+        assert!(present["estimated_remaining_seconds"].is_null());
+    }
 }

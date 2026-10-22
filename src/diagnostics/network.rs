@@ -192,10 +192,10 @@ pub fn public_ip(ip: IpAddr) -> bool {
     }
 }
 fn allowed(ip: IpAddr, local: bool) -> bool {
-    if let IpAddr::V6(ip) = ip {
-        if let Some(v4) = ip.to_ipv4_mapped() {
-            return allowed(v4.into(), local);
-        }
+    if let IpAddr::V6(ip) = ip
+        && let Some(v4) = ip.to_ipv4_mapped()
+    {
+        return allowed(v4.into(), local);
     }
     let metadata = ip == "169.254.169.254".parse::<IpAddr>().unwrap()
         || ip == "100.100.100.200".parse::<IpAddr>().unwrap();

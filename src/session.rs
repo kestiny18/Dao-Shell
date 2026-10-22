@@ -188,8 +188,9 @@ impl FileSession {
                     .dialogue
                     .as_mut()
                     .ok_or_else(|| anyhow::anyhow!("model_unavailable"))?;
-                dialogue.observe_local("resource_observe", &snapshot);
-                dialogue.turn(self.language.choose("只解释这次已完成资源观测的确定性摘要，区分事实、相关性、假设；不调用工具或准备动作。","Explain only this completed observation's deterministic summary. Separate facts, correlation and hypotheses; do not call tools or prepare actions."),&mut self.runtime,ui).await
+                dialogue
+                    .explain_observation(&snapshot, &self.runtime.cancel)
+                    .await
             }
             Action::ExplainComputer(snapshot) => {
                 ensure!(

@@ -71,7 +71,9 @@ to 4,096 entries and eight nested directories. Execution rechecks and pins the s
 and target identity; refresh invalidates old action references. Administrator execution
 uses Windows UAC; cancellation is reported as cancellation. A handoff receipt does
 not prove that the application started. These actions share the global request lock
-and are available only through explicit UI actions, never model tools.
+and remain explicit overview UI branches. Administrator execution, location and
+uninstall are not model tools; the separately confirmed Phase 2 launch/termination
+path is described below.
 
 The existing green D/chevron mark is explicitly configured in `bundle.icon` as
 both PNG and Windows ICO, including the installer icon.
@@ -496,8 +498,8 @@ performance claim. macOS/Linux collection policies are not implemented here.
 
 Chat now provides read-only CPU/memory/volume-space observations, process pages,
 network interface rates, registered applications (including conservative running
-matches), and hardware configuration with current uptime. Application launch,
-termination and installation are not model tools.
+matches), and hardware configuration with current uptime. Phase 2 separately adds
+confirmed ordinary launch and exact-instance termination; installation remains outside model tools.
 
 Settings → Access → Computer information sharing is separate from file access.
 Old configurations default to Ask. The first attempted computer tool shows a
@@ -534,3 +536,33 @@ The directory must be new. It creates its own configuration, inert file fixture,
 local model server and WebView profile, writes bounded evidence/screenshots locally,
 and closes its own desktop. It never uses saved credentials or calls a cloud model.
 See [Phase 1 evidence](../docs/devlog/2026-10-20-phase1-computer-query.md).
+
+
+## Phase 2 application actions (partial local prototype)
+
+Ordinary application launch and explicit force termination are available through
+chat and local application controls. Each action freezes a concrete target and
+requires a fresh local confirmation showing the actual entry/path or process
+instance and risk. Discovery is not authorization. Duplicate calls cannot repeat
+an action; rejection, cancellation or unavailable close prevents an alternative
+changing action in the same request. CLI does not expose these tools.
+
+Normal close remains **unavailable** (`close_identity_not_atomic`): the current
+Windows provider cannot atomically bind window identity verification to dispatch.
+It never substitutes force termination. Phase 2 as a whole is unfinished; only
+launch/force-termination scope is READY for isolated prototype trials.
+
+The new launch path uses ordinary-user CreateProcess with an explicitly constructed
+user environment, excludes configured API-key names and product/test variables,
+and accepts no arbitrary arguments or shell fallback. Creation does not prove
+application readiness. Force termination checks the precise current-user process
+identity and observes its original handle; unknown results are not replayed.
+A separate local SQLite journal records minimal receipts before dispatch. History
+supports read-only reconciliation and completed-history cleanup. Restarted pending
+receipts become unknown, while saved evidence is retained. Local controls work
+without model sharing; model tools require computer-information sharing.
+
+The isolated Debug smoke uses only a dedicated fixture tree, marker and explicit
+isolated config. Its fixture-discovery hook is compiled out of Release and is off
+by default; model parameters cannot enable it. It never modifies the real Start
+menu. See [Phase 2 delivery and trial commands](../docs/devlog/2026-10-22-phase2-app-actions.md).

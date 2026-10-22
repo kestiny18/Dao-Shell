@@ -2,11 +2,11 @@
 
 Date: 2026-10-20
 Implementation: IN_PROGRESS
-Self-test: PENDING
+Self-test: PASS（启动/强制结束已交付子范围；正常关闭 BLOCKED）
 Independent testing: NOT_RUN
 Independent review: NOT_RUN
 Authorization: 2026-10-22 用户批准第二期实施及小步本地提交；不推送、发布或操作真实办公应用。基线 86f0ce6。
-Delivery: 第二期产品、接口、边界与实施任务设计。
+Delivery: 启动/强制结束原型 READY；正常关闭 BLOCKED，整期未完成。
 Baseline: `86f0ce6e0cee77a73f2b321b5ae3184ef1df2e8d`；设计时工作区干净。
 Parent: [分期方案](2026-10-20-computer-capabilities-roadmap.md)
 Prerequisite: [第一期交付](../devlog/2026-10-20-phase1-computer-query.md)
@@ -186,27 +186,27 @@ Dialogue / 本地操作 UI
 ## 9. 实施任务与验收
 
 ### T0 — 原生动作可行性与边界试验
-Implementation: PLANNED
+Implementation: READY（已交付子范围；边界见下文）
 
 使用专用测试程序模拟多窗口、保存提示、忽略关闭、短命启动器、普通/提升需求及并发窗口重建。验证普通权限启动环境、pin 期间目标替换拒绝、关闭消息身份竞态和退出观察。输出事实及未支持场景；此任务不要求新增产品框架。
 
 ### T1 — 核心目标与计划
-Implementation: PLANNED
+Implementation: READY（已交付子范围；边界见下文）
 
 实现操作目标发现、独立引用、不可变计划与严格参数；旧观测只作线索。验证伪造/过期引用、跨会话、PID 复用、入口替换、重名/多入口、受保护/高权限目标、筛选与分页不会转绑对象。
 
 ### T2 — 启动闭环与最小回执
-Implementation: PLANNED
+Implementation: READY（已交付子范围；边界见下文）
 
 交付普通权限启动、本地确认、派发前日志及结果摘要。覆盖 double click、重复 tool call、取消前/后、确认超时、提升要求、启动器转交、写盘失败与崩溃未知。为此阶段单独小步提交并交付受控原型。
 
 ### T3 — 正常关闭与强制结束
-Implementation: PLANNED
+Implementation: IN_PROGRESS；正常关闭 BLOCKED（close_identity_not_atomic），强制结束 READY
 
 两种动作分开实现并各自验证：保存提示不代点、窗口关闭不等于进程退出、确认集合变化拒绝、进程已退出/PID 复用不操作新进程、取消不撤回已发生结果、未知不重试。正常关闭能力必须满足 T0 所明确的安全边界。
 
 ### T4 — 桌面与模型协议回归
-Implementation: PLANNED
+Implementation: READY（已交付子范围；边界见下文）
 
 中英确认卡、明确风险、实例选择、三种不同结果、核对入口、重启历史、共享关闭和本地功能；固定本机模型验证真实 UI 事件、令牌不泄漏、取消后不换工具再试。
 
@@ -218,11 +218,11 @@ Implementation: PLANNED
 
 ## 10. 状态与下一步
 
-当前为设计，未实现或测试正常关闭/新启动路径。只有 T0–T4 必要自测完成且无已知误目标路径，才可标本期 Implementation: READY；功能被阻塞时如实标对应任务，不将整期称完成。
+2026-10-22 已实施并自测普通权限启动和明确实例强制结束；正常关闭未开放。只有 T0–T4 必要自测完成且无已知误目标路径，才可标本期 Implementation: READY；功能被阻塞时如实标对应任务，不将整期称完成。
 
 独立测试、评审仍由用户触发。建议在实际日常程序试用前针对实例身份、确认归属、窗口消息竞态和崩溃未知做独立检查，本方案不自动派发角色。
 
-建议实施顺序 T0 → T1 → T2 → T3 → T4。T2 和 T3 分别形成可验证的小步提交；当前设计不授权实施、真实应用操作或发布。
+本次实施及小步本地提交已获用户明确批准；不授权真实办公应用操作、推送或发布。正常关闭仍是本期必要未完项。
 
 
 ## 2026-10-22 实施检查点
@@ -232,3 +232,12 @@ T0 已用专用隐藏窗口实际验证：正常处理 WM_CLOSE 与忽略消息�
 第一批核心检查：`check --locked`、桌面 `check` 通过；application_actions 定向 8 passed/1 ignored，另显式构建并运行专用 `phase2_owned_app` 原生测试 1 passed。该原生测试只操作临时目录复制的专用应用，验证普通权限启动、环境排除与固定工作目录、进程创建回执/原实例核对/强制结束，以及短命启动器仍应记录已创建进程。没有操作真实办公应用、浏览器或用户文档。
 
 实际窗口证据：忽略目录 `.tools/phase2-window-boundary-20261022.json`；源程序 `examples/window_close_boundary.rs`。原生启动/结束源夹具 `examples/phase2_owned_app.rs` 与 `application_actions::tests::owned_native_launch_environment_receipt_and_force_termination`。后续 UI 和完整回归待完成。
+
+
+## 最终候选与自测（2026-10-22）
+
+代码候选 `424ab10`（核心 `4101d62`）。启动/强制结束子范围 Implementation: READY；整期 Implementation: IN_PROGRESS，唯一功能阻塞为正常关闭身份核验与消息派发无法原子化。T0 的 READY 表示已完成边界判定，不表示正常关闭可用。T4 的 READY 仅适用于已开放子范围。
+
+最终定向动作测试 9 passed/1 ignored；原生进程身份 2 passed/1 ignored；专用原生启动/结束测试另显式运行通过。协议 19/19、UI 70/70；核心全目标回归、桌面 Rust 22/22、核心/桌面 fmt 和 Clippy、桌面 Debug 构建通过。最终隔离 WebView c 轮 13/13、20 次本机固定响应请求，无错误；早期 a 轮使用未接完上下文的旧二进制失败，保留失败证据，不计通过。
+
+最终证据 `.tools/phase2-actions-smoke-20261022c/evidence.json`。详见[交付记录](../devlog/2026-10-22-phase2-app-actions.md)，包括版本、可复现命令和未验证项。独立测试/评审 NOT_RUN，真实云模型理解、独立机器及真实办公应用 NOT_VERIFIED。

@@ -2,13 +2,23 @@
 
 Date: 2026-10-22 (Asia/Shanghai)
 Implementation: IN_PROGRESS
-Self-test: PENDING
+Self-test: PARTIAL（维护定向及桌面检查通过；全量回归存在未定位失败，见实现记录）
 Independent testing: NOT_RUN
 Independent review: NOT_RUN
 Authorization: 2026-10-22 用户明确批准第四期开发及小步本地提交；写入自测仅隔离夹具/独立Windows测试环境，不在个人工作机装卸真实软件、修改真实Startup或清理真实DNS。不推送、发布或安装服务。
 Baseline: `5bf53f8f84b9071ba15a485162152d216b782f31`
 Parent: [整体分期](2026-10-20-computer-capabilities-roadmap.md)
 Previous: [第三期诊断方案](2026-10-22-phase3-diagnostics-design.md)
+
+## 本轮执行边界更新
+
+2026-10-22 用户确认：测试环境在另一台机器，目前只能由用户操作。开发继续完成本地实现、隔离夹具、桌面确认与协议自测；真实装卸、Startup 写入、DNS 清理由用户按[另一台机器的测试说明](../testing/phase4-other-machine.md)执行，未收到结果前保持 NOT_VERIFIED。
+
+本机 T0：WinGet v1.29.380、DesktopAppInstaller 1.29.379.0；原生 PackageManager 使用生产 CLSID/实际 winmd 的接口，激活返回 `0x80073D54`。结构化 CLI export 也未形成可用证据。类型化 adapter 已实现，但不能据此宣称软件闭环可用，也不启用命令行装卸回退或推断 absent。
+
+当前本地发现入口保守限定为当前用户范围、目录默认版本、最多20个候选；引用5分钟、确认90秒。机器范围和任意历史版本选择、真实安装器/权限/重启结果、软件异步操作的可靠空闲核对及人工归档仍未完成验证或交付，不从原型缩减范围推导整期 READY。
+
+本轮代码候选 `529b185`，详细证据与回归失败见[第四期实现记录](../devlog/2026-10-22-phase4-maintenance.md)。真实 provider、实机写入、全量回归及尚未交付的核对/归档能力均未被标为通过。
 
 ## 1. 目标和范围
 
@@ -161,3 +171,7 @@ T0 验证受支持原生 API/固定 provider 的权限与返回语义，禁止�
 长期监控、告警、自动更新与后台修复属于未来单独产品决策，不作为第四期暗含工作。若用户后来需要，先定义退出后行为、通知、成本、数据保留和授权撤销，再决定是否需要后台runtime。
 
 本轮已完成设计，不宣称WinGet COM/CLI、启动项写入、DNS清理或回滚已实测。第二期正常关闭仍单独BLOCKED，后续维护计划不改变其状态。
+
+2026-10-23 更新：最终本地代码候选 `9d36170fbeba9770f45d4bc40a378c08ac690fd5`；补充跨安装范围核对、多实例拒绝及隔离 DNS 禁派发闩锁。整期仍 IN_PROGRESS；全量回归 NOT_PASS，真实写入 NOT_VERIFIED。详见本轮 devlog 与另一台机器人工验证说明。
+
+最终交付候选 `62bec9bb8195b0a5ef69cbbba61999c18ebd21e2`；最后一项提交仅修复测试启动脚本，最终隔离WebView 8项通过。测试包见 `.tools/phase4-trial-62bec9b.zip`，整期状态不变。

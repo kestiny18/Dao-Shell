@@ -4,7 +4,7 @@ const root=path.resolve('.tools',`maintenance-smoke-${Date.now()}`);fs.mkdirSync
 const exe=path.resolve('desktop/src-tauri/target/debug/dao-shell-desktop.exe');
 const config=path.join(root,'config.json');fs.writeFileSync(config,JSON.stringify({read_roots:[root],computer_query_sharing:'disabled',ui_language:'zh-CN'}));
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const evidence={root,checks:[],native_writes:'NOT_EXECUTED',real_package_provider:'NOT_VERIFIED'};let socket,client,pid;
+const evidence={root,checks:[],native_writes:'NOT_EXECUTED',real_package_provider:'NOT_VERIFIED'};let socket,client,identity;
 class CDP{
  constructor(socket){this.socket=socket;this.id=0;this.pending=new Map();socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id){const p=this.pending.get(m.id);if(p){this.pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result);}}});}
  send(method,params={}){const id=++this.id;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(`Timed out: ${method}`)),30000);this.pending.set(id,{resolve,reject,timer});this.socket.send(JSON.stringify({id,method,params}));});}
@@ -13,10 +13,13 @@ class CDP{
 async function check(label,expression){assert.equal(await client.evaluate(expression),true,label);evidence.checks.push(label);console.log(label);}
 try{
  const server=net.createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));const port=server.address().port;await new Promise(r=>server.close(r));
- pid=Number(execFileSync('powershell.exe',['-NoProfile','-Command',"(Start-Process -FilePath $env:DAO_TEST_DESKTOP -WindowStyle Hidden -PassThru).Id"],{encoding:'utf8',env:{...process.env,DAO_TEST_DESKTOP:exe,DAO_SHELL_DESKTOP_CONFIG:config,WEBVIEW2_USER_DATA_FOLDER:path.join(root,'webview'),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port}`}}).trim());
- let page;for(let i=0;i<120;i++){try{page=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(p=>p.type==='page'&&p.webSocketDebuggerUrl);if(page)break;}catch{}await delay(250);}assert(page,'No isolated WebView');
+ identity=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',"$owned=Start-Process -FilePath $env:DAO_TEST_DESKTOP -WindowStyle Hidden -RedirectStandardOutput $env:DAO_TEST_STDOUT -RedirectStandardError $env:DAO_TEST_STDERR -PassThru; @{pid=$owned.Id;start_ticks=$owned.StartTime.ToUniversalTime().Ticks.ToString()} | ConvertTo-Json -Compress"],{encoding:'utf8',env:{...process.env,DAO_TEST_DESKTOP:exe,DAO_TEST_STDOUT:path.join(root,'startup.out'),DAO_TEST_STDERR:path.join(root,'startup.err'),DAO_SHELL_DENY_NATIVE_DNS:'1',DAO_SHELL_DESKTOP_CONFIG:config,WEBVIEW2_USER_DATA_FOLDER:path.join(root,'webview'),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:`--remote-debugging-port=${port}`}}).trim());
+ evidence.process=identity;evidence.startup_budget_ms=60000;
+ let page;for(let deadline=Date.now()+60000;Date.now()<deadline;){try{page=(await(await fetch(`http://127.0.0.1:${port}/json/list`,{signal:AbortSignal.timeout(1000)})).json()).find(p=>p.type==='page'&&p.webSocketDebuggerUrl);if(page)break;}catch{}await delay(250);}assert(page,'No isolated WebView');
  socket=new WebSocket(page.webSocketDebuggerUrl);await new Promise((r,j)=>{socket.addEventListener('open',r,{once:true});socket.addEventListener('error',j,{once:true});});client=new CDP(socket);
  for(let i=0;i<120;i++){if(await client.evaluate("typeof ready!=='undefined'&&ready&&!busy"))break;await delay(100);}
+ await client.evaluate("run('maintenance-local',JSON.stringify({kind:'debug_fixture_status'}))");
+ await check('Debug native-DNS deny latch is active before testing confirmations',"state(workspace.active).maintenanceResult.native_dns_dispatch_denied===true");
  await client.evaluate("run('maintenance-local',JSON.stringify({kind:'history'}))");
  await check('Local maintenance is available without model or fact sharing',"Boolean(session()&&document.getElementById('maintenance-panel')) && state(workspace.active).maintenanceResult.receipts.length===0");
  await client.evaluate("globalThis.trial=run('maintenance',JSON.stringify({tool:'network_maintenance',arguments:{kind:'flush_dns_cache',confirmed:true}}));true");
@@ -34,6 +37,6 @@ try{
 }catch(error){evidence.status='FAIL';evidence.error=String(error);process.exitCode=1;}
 finally{
  if(client){try{await client.evaluate("setTimeout(()=>api.invoke('finish_close'),100);true");await delay(500);}catch{}socket?.close();}
- if(pid&&!client){try{execFileSync('powershell.exe',['-NoProfile','-Command',`Stop-Process -Id ${pid} -ErrorAction SilentlyContinue`]);}catch{}}
+ if(identity){try{execFileSync('powershell.exe',['-NoProfile','-Command',"$owned=Get-Process -Id $env:DAO_TEST_PID -ErrorAction SilentlyContinue; if($owned -and $owned.StartTime.ToUniversalTime().Ticks.ToString() -eq $env:DAO_TEST_START -and $owned.Path -eq $env:DAO_TEST_DESKTOP){$owned | Stop-Process -ErrorAction SilentlyContinue}"],{env:{...process.env,DAO_TEST_PID:String(identity.pid),DAO_TEST_START:identity.start_ticks,DAO_TEST_DESKTOP:exe}});}catch{}}
  fs.writeFileSync(path.join(root,'evidence.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));
 }

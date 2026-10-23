@@ -75,6 +75,10 @@ impl Store {
     }
     pub fn local(&mut self, args: Value) -> Result<Value> {
         match args["kind"].as_str() {
+            #[cfg(debug_assertions)]
+            Some("debug_fixture_status") => {
+                Ok(json!({"native_dns_dispatch_denied":super::dns::native_dispatch_denied()}))
+            }
             Some("source_authorize") => {
                 let token = uuid::Uuid::new_v4().to_string();
                 self.source = Some(token.clone());

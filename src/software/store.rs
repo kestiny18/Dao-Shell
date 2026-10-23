@@ -258,7 +258,30 @@ impl Store {
                 }
             }
         }
-        for r in self.engine()?.history()? {
+        let retained = root
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("unsupported_startup_path"))?
+            .join("DaoShellDisabledStartup");
+        let receipts = self.engine()?.check_startup(&root, &retained)?;
+        let mut seen = std::collections::HashSet::new();
+        for r in &receipts {
+            if r["lifecycle"] == "startup_checked_retained"
+                && let Some(path) = r["startup_proof"]["retained"].as_str()
+                && seen.insert(path.to_owned())
+                && let Ok(p) = PinnedShortcut::inspect(std::path::Path::new(path))
+                && retained_matches(&p, &r["startup_proof"])
+            {
+                let key = uuid::Uuid::new_v4().to_string();
+                items.push(json!({"startup_ref":key,"name":r["original_name"],"path":r["original"],"mode":"restore","check":"retained_file_verified","previous_outcome":"unknown","requires_new_local_confirmation":true}));
+                self.shortcuts.insert(
+                    key,
+                    (
+                        p,
+                        r["original"].as_str().unwrap_or("").into(),
+                        Instant::now(),
+                    ),
+                );
+            }
             if r["operation"] == "startup_disable"
                 && r["lifecycle"] == "verified"
                 && let Some(path) = r["evidence"]["retained"].as_str()
@@ -280,7 +303,7 @@ impl Store {
             }
         }
         Ok(
-            json!({"items":items,"coverage":"current_user_startup_lnk_only","limits":"Registration is not proof of enabled state. Registry, RunOnce, services and tasks cannot be changed."}),
+            json!({"items":items,"startup_checks":receipts.iter().filter(|r|r.get("startup_check").is_some()).map(|r|json!({"operation_id":r["operation_id"],"check":r["startup_check"],"lifecycle":r["lifecycle"]})).collect::<Vec<_>>(),"coverage":"current_user_startup_lnk_only","limits":"Checks describe current file placement; previous outcome remains unknown. Restore requires a new local confirmation. Registration is not proof of enabled state. Registry, RunOnce, services and tasks cannot be changed."}),
         )
     }
     fn startup_change(
@@ -323,7 +346,8 @@ impl Store {
             original.clone()
         };
         let p = p.clone();
-        let receipt = json!({"operation_id":operation_id,"operation":if disable{"startup_disable"}else{"startup_restore"},"original":original,"original_name":original.file_name().map(|s|s.to_string_lossy()),"target":destination,"context":self.context,"risk":"Changes next-login Startup registration only. Does not stop a running app or prove enabled state."});
+        let proof = json!({"original":original,"retained":if disable {destination.clone()} else {p.path.clone()},"identity":p.identity,"digest":p.digest.to_vec()});
+        let receipt = json!({"operation_id":operation_id,"operation":if disable{"startup_disable"}else{"startup_restore"},"original":original,"original_name":original.file_name().map(|s|s.to_string_lossy()),"target":destination,"startup_proof":proof,"context":self.context,"risk":"Changes next-login Startup registration only. Does not stop a running app or prove enabled state."});
         self.engine()?.local_transition(receipt,cancel,&mut |v|Ok(ui.confirm_maintenance(v)?.approved),&mut ||{
             let _guard=crate::platform::pin_directory(root.parent().unwrap())?;
             with_retention(&retained,disable,||{
@@ -333,7 +357,7 @@ impl Store {
         })
     }
 }
-fn with_retention<T>(
+pub(crate) fn with_retention<T>(
     path: &std::path::Path,
     create: bool,
     dispatch: impl FnOnce() -> Result<T>,

@@ -985,3 +985,15 @@ test('maintenance source opt-in, result fallback and context reset revoke volati
  assert.equal(st.maintenanceSource,'private-source-token');assert.equal(JSON.stringify(f.saved()).includes('private-source-token'),false);
  f.w.eval('invalidateContexts()');assert.equal(st.maintenanceSource,null);
 });
+
+test('Startup read-only recovery checks show unknown attribution and require explicit restore',async(t)=>{
+ const value={items:[{startup_ref:'private-startup-reference',name:'fixture.lnk',mode:'restore'}],startup_checks:[{lifecycle:'startup_checked_retained',check:{placement:'retained',attribution:'unknown'}}]};
+ const f=await fixture({perform:async()=>({message:'checked',error:false,items:[],maintenance_results:[value]})});t.after(()=>f.dom.window.close());
+ await f.w.run('maintenance-local',JSON.stringify({kind:'startup_targets'}));await f.tick();
+ const root=f.$('maintenance-panel');assert.match(root.textContent,/只读核对/);assert.match(root.textContent,/上次操作结果仍未知/);assert.match(root.textContent,/新的本地确认/);
+ assert([...root.querySelectorAll('button')].some(b=>b.textContent===f.w.t('maintenance.restore')));
+ assert.equal(f.calls.filter(c=>c.command==='confirm_maintenance').length,0);
+ assert.equal(JSON.stringify(f.saved()).includes('private-startup-reference'),false);
+ const st=f.w.eval('state(workspace.active)');st.maintenanceResult={receipts:[{operation:'startup_restore',lifecycle:'startup_checked_original',startup_check:{placement:'original',attribution:'unknown'}}]};f.w.eval('renderCurrent()');
+ assert.match(root.textContent,/没有自动重放/);assert.match(root.textContent,/上次操作结果仍未知/);
+});

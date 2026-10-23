@@ -78,7 +78,9 @@ impl Journal {
         let mut n = 0;
         for r in self.list()? {
             // The file is retained until an explicit restore; time must not erase its proof.
-            if r["operation"] == "startup_disable" && r["lifecycle"] == "verified" {
+            if (r["operation"] == "startup_disable" && r["lifecycle"] == "verified")
+                || r["lifecycle"] == "startup_checked_retained"
+            {
                 continue;
             }
             if matches!(

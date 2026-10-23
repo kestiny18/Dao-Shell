@@ -30,6 +30,66 @@ impl Engine {
     pub fn history(&self) -> Result<Vec<Value>> {
         self.journal.list()
     }
+    /// Startup has no surviving external provider after the journal lock is acquired.
+    /// Record present file placement, while retaining unknown historical attribution.
+    pub fn check_startup(
+        &mut self,
+        root: &std::path::Path,
+        retained: &std::path::Path,
+    ) -> Result<Vec<Value>> {
+        ensure!(
+            root.parent()
+                .is_some_and(|p| p.join("DaoShellDisabledStartup") == retained),
+            "startup_scope_changed"
+        );
+        let _parent = crate::platform::pin_directory(root.parent().unwrap())?;
+        for mut r in self.history()? {
+            if r["lifecycle"] == "startup_checked_original" {
+                continue; // Settled observations must not later claim a newly changed file.
+            }
+            if r["operation"] == "startup_disable"
+                && r["lifecycle"] == "verified"
+                && r["startup_proof"].is_null()
+            {
+                r["startup_proof"] = json!({"original":r["original"],"retained":r["evidence"]["retained"],"identity":r["evidence"]["identity"],"digest":r["evidence"]["digest"]});
+            }
+            if !matches!(
+                r["operation"].as_str(),
+                Some("startup_disable" | "startup_restore")
+            ) || r["startup_proof"].is_null()
+            {
+                continue;
+            }
+            let checked = match std::fs::symlink_metadata(retained) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    super::startup::observe(&r["startup_proof"], root, retained)
+                }
+                Ok(_) => super::store::with_retention(retained, false, || {
+                    super::startup::observe(&r["startup_proof"], root, retained)
+                }),
+                Err(e) => Err(e.into()),
+            };
+            let observed = checked.unwrap_or("conflict_or_unknown");
+            r["startup_check"] = json!({"at":crate::core::now(),"placement":observed,"attribution":"unknown","automatic_replay":false});
+            if matches!(
+                r["lifecycle"].as_str(),
+                Some(
+                    "unknown"
+                        | "verified"
+                        | "startup_checked_retained"
+                        | "startup_checked_original"
+                )
+            ) {
+                r["lifecycle"] = json!(match observed {
+                    "retained" => "startup_checked_retained",
+                    "original" => "startup_checked_original",
+                    _ => "unknown",
+                });
+            }
+            self.journal.save(&r)?;
+        }
+        self.history()
+    }
     pub fn local_transition(
         &mut self,
         mut receipt: Value,
@@ -186,6 +246,214 @@ impl Engine {
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+    #[cfg(windows)]
+    fn startup_fixture() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        super::super::startup::PinnedShortcut,
+        Value,
+    ) {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("Startup");
+        let retained = d.path().join("DaoShellDisabledStartup");
+        std::fs::create_dir(&root).unwrap();
+        super::super::store::with_retention(&retained, true, || Ok(())).unwrap();
+        let original = root.join("fixture.lnk");
+        let mut bytes = vec![0; 76];
+        bytes[..4].copy_from_slice(&[76, 0, 0, 0]);
+        bytes[4..20].copy_from_slice(&[1, 20, 2, 0, 0, 0, 0, 0, 192, 0, 0, 0, 0, 0, 0, 70]);
+        std::fs::write(&original, bytes).unwrap();
+        let p = super::super::startup::PinnedShortcut::inspect(&original).unwrap();
+        let proof = json!({"original":original,"retained":retained.join("one.lnk"),"identity":p.identity,"digest":p.digest.to_vec()});
+        (d, root, retained, p, proof)
+    }
+    #[cfg(windows)]
+    #[test]
+    fn startup_final_save_failure_reopens_checks_and_restore_requires_new_confirmation() {
+        let (d, root, retained, p, proof) = startup_fixture();
+        let journal = d.path().join("journal");
+        let saved = std::path::PathBuf::from(proof["retained"].as_str().unwrap());
+        let mut engine = Engine::open(&journal).unwrap();
+        let result = engine.local_transition(json!({"operation_id":"disable","operation":"startup_disable","startup_proof":proof}), &Cancellation::default(), &mut |_| Ok(true), &mut || {
+            p.relocate(&saved)?;
+            Ok(json!({"lifecycle":"verified","oversize":"x".repeat(40000)}))
+        }).unwrap();
+        assert_eq!(result["persistence_warning"], true);
+        drop(engine);
+        let mut engine = Engine::open(&journal).unwrap();
+        assert!(engine.unresolved().unwrap());
+        assert_eq!(engine.history().unwrap()[0]["startup_proof"], proof);
+        let rows = engine.check_startup(&root, &retained).unwrap();
+        assert_eq!(rows[0]["lifecycle"], "startup_checked_retained");
+        assert_eq!(rows[0]["startup_check"]["attribution"], "unknown");
+        assert!(!engine.unresolved().unwrap());
+        let restore =
+            json!({"operation_id":"restore","operation":"startup_restore","startup_proof":proof});
+        let mut calls = 0;
+        engine
+            .local_transition(
+                restore.clone(),
+                &Cancellation::default(),
+                &mut |_| Ok(false),
+                &mut || {
+                    calls += 1;
+                    Ok(json!({"lifecycle":"verified"}))
+                },
+            )
+            .unwrap();
+        assert_eq!(calls, 0);
+        assert!(saved.exists());
+        engine.begin_turn();
+        let original = p.path.clone();
+        engine
+            .local_transition(
+                restore,
+                &Cancellation::default(),
+                &mut |_| Ok(true),
+                &mut || {
+                    super::super::startup::PinnedShortcut::inspect(&saved)?.relocate(&original)?;
+                    Ok(json!({"lifecycle":"verified","oversize":"x".repeat(40000)}))
+                },
+            )
+            .unwrap();
+        drop(engine);
+        let mut engine = Engine::open(&journal).unwrap();
+        assert!(engine.unresolved().unwrap());
+        let rows = engine.check_startup(&root, &retained).unwrap();
+        assert!(
+            rows.iter()
+                .all(|r| r["lifecycle"] == "startup_checked_original")
+        );
+        assert!(!engine.unresolved().unwrap());
+        assert!(original.exists());
+        assert!(!saved.exists());
+        // Settled records may be cleaned, including old disable proofs after restoration.
+        assert_eq!(engine.journal.prune(true).unwrap(), 2);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn startup_crash_process_helper() {
+        let Some(directory) = std::env::var_os("DAOSHELL_STARTUP_CRASH_FIXTURE") else {
+            return;
+        };
+        let d = std::path::PathBuf::from(directory);
+        let proof: Value =
+            serde_json::from_slice(&std::fs::read(d.join("proof.json")).unwrap()).unwrap();
+        let p = super::super::startup::PinnedShortcut::inspect(std::path::Path::new(
+            proof["original"].as_str().unwrap(),
+        ))
+        .unwrap();
+        let mut engine = Engine::open(&d.join("journal")).unwrap();
+        engine.local_transition(json!({"operation_id":"disable","operation":"startup_disable","startup_proof":proof}), &Cancellation::default(), &mut |_| Ok(true), &mut || {
+            p.relocate(std::path::Path::new(proof["retained"].as_str().unwrap()))?;
+            std::process::exit(91); // Abrupt process exit: no final receipt and no Rust cleanup.
+        }).unwrap();
+        panic!("fixture did not exit after move");
+    }
+    #[cfg(windows)]
+    #[test]
+    fn startup_crash_after_move_preserves_proof_and_software_unknown_gate() {
+        let (d, root, retained, _p, proof) = startup_fixture();
+        let journal = d.path().join("journal");
+        let saved = std::path::PathBuf::from(proof["retained"].as_str().unwrap());
+        std::fs::write(
+            d.path().join("proof.json"),
+            serde_json::to_vec(&proof).unwrap(),
+        )
+        .unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "software::engine::tests::startup_crash_process_helper",
+                "--nocapture",
+            ])
+            .env("DAOSHELL_STARTUP_CRASH_FIXTURE", d.path())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(91));
+        let mut engine = Engine::open(&journal).unwrap();
+        engine.journal.save(&json!({"operation_id":"software","operation":"install","lifecycle":"unknown","created_at":crate::core::now()})).unwrap();
+        engine.check_startup(&root, &retained).unwrap();
+        assert!(engine.unresolved().unwrap());
+        assert_eq!(
+            engine
+                .history()
+                .unwrap()
+                .iter()
+                .find(|r| r["operation_id"] == "software")
+                .unwrap()["lifecycle"],
+            "unknown"
+        );
+        assert_eq!(engine.journal.prune(true).unwrap(), 0);
+        assert!(saved.exists());
+        let mut moved = false;
+        assert!(engine.local_transition(json!({"operation_id":"blocked","operation":"startup_restore","startup_proof":proof}), &Cancellation::default(), &mut |_| Ok(true), &mut || { moved=true; Ok(json!({"lifecycle":"verified"})) }).is_err());
+        assert!(!moved);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn startup_checks_unmoved_conflict_replacement_and_content_drift() {
+        for scenario in [
+            "unmoved",
+            "conflict",
+            "replacement",
+            "drift",
+            "bad_root",
+            "missing_both",
+        ] {
+            let (d, root, retained, p, mut proof) = startup_fixture();
+            let saved = std::path::PathBuf::from(proof["retained"].as_str().unwrap());
+            match scenario {
+                "unmoved" => {}
+                "bad_root" => {
+                    proof["original"] = json!(d.path().join("foreign.lnk"));
+                }
+                "missing_both" => {
+                    std::fs::remove_file(&p.path).unwrap();
+                }
+                other => {
+                    p.relocate(&saved).unwrap();
+                    let bytes = std::fs::read(&saved).unwrap();
+                    match other {
+                        "conflict" => std::fs::write(&p.path, bytes).unwrap(),
+                        "replacement" => {
+                            std::fs::rename(&saved, retained.join("parked.lnk")).unwrap();
+                            std::fs::write(&saved, bytes).unwrap();
+                        }
+                        "drift" => {
+                            let mut changed = bytes;
+                            changed[40] = 1;
+                            std::fs::write(&saved, changed).unwrap();
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            let mut engine = Engine::open(&d.path().join("journal")).unwrap();
+            engine.journal.save(&json!({"operation_id":"one","created_at":crate::core::now(),"operation":"startup_disable","lifecycle":"unknown","startup_proof":proof})).unwrap();
+            let rows = engine.check_startup(&root, &retained).unwrap();
+            if scenario == "unmoved" {
+                assert_eq!(rows[0]["lifecycle"], "startup_checked_original");
+                assert!(!engine.unresolved().unwrap());
+            } else {
+                assert_eq!(rows[0]["lifecycle"], "unknown", "{scenario}");
+                assert!(engine.unresolved().unwrap(), "{scenario}");
+            }
+        }
+    }
+    #[cfg(windows)]
+    #[test]
+    fn startup_initial_persistence_failure_never_moves() {
+        let (d, _root, _retained, p, proof) = startup_fixture();
+        let mut engine = Engine::open(&d.path().join("journal")).unwrap();
+        let saved = std::path::PathBuf::from(proof["retained"].as_str().unwrap());
+        let mut called = false;
+        assert!(engine.local_transition(json!({"operation_id":"oversize","operation":"startup_disable","startup_proof":proof,"oversize":"x".repeat(40000)}), &Cancellation::default(), &mut |_| Ok(true), &mut || { called=true; p.relocate(&saved)?; Ok(json!({"lifecycle":"verified"})) }).is_err());
+        assert!(!called);
+        assert!(p.path.exists());
+        assert!(!saved.exists());
+    }
     #[test]
     fn local_refusal_and_cancel_never_dispatch_and_failed_final_save_recovers_unknown() {
         let directory = tempfile::tempdir().unwrap();

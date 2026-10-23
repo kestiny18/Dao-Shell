@@ -36,6 +36,9 @@ function renderMaintenance(st) {
   if(value){
     const result=document.createElement('section');result.className='card';
     if(value.error){const note=document.createElement('p');note.textContent=errorText(value.error);result.append(note);}
+    for(const row of value.startup_checks || []){
+      const note=document.createElement('p');note.textContent=t(`maintenance.startup_check_${['retained','original'].includes(row.check?.placement)?row.check.placement:'conflict_or_unknown'}`);result.append(note);
+    }
     for(const row of value.items || []){
       const item=document.createElement('div');item.className='file-row';
       const text=document.createElement('div');text.className='file-detail';text.textContent=[row.name,row.package_id,row.version,row.installed_version?`${t("maintenance.installed_version")}: ${row.installed_version}`:null,row.scope,row.source,row.path].filter(Boolean).join('\n');item.append(text);
@@ -47,6 +50,7 @@ function renderMaintenance(st) {
     if(value.items?.length===0){const note=document.createElement('p');note.textContent=t('maintenance.empty');result.append(note);}
     for(const receipt of value.receipts || (value.operation_id?[value]:[])){
       const note=document.createElement('p');const status=['verified','failed','cancelled_before_dispatch','awaiting_user','awaiting_reboot'].includes(receipt.lifecycle)?receipt.lifecycle:'unknown';note.textContent=`${receipt.operation || ''} · ${receipt.package?.package_id || ''} ${receipt.package?.version || ''}\n${t(`maintenance.${status}`)}${receipt.operation==='flush_dns_cache'?`\n${t('maintenance.dns_report')}`:''}${receipt.persistence_warning?`\n${t('maintenance.warning')}`:''}`;result.append(note);
+      if(receipt.startup_check){const checked=document.createElement('p');checked.textContent=t(`maintenance.startup_check_${['retained','original'].includes(receipt.startup_check.placement)?receipt.startup_check.placement:'conflict_or_unknown'}`);result.append(checked);}
     }
     if(value.status==='cancelled_before_dispatch'){const note=document.createElement('p');note.textContent=t('maintenance.cancelled_before_dispatch');result.append(note);}
     root.append(result);

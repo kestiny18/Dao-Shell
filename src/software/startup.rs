@@ -1,8 +1,51 @@
 //! Local, identity-bound Startup file transitions. No shortcut is executed.
 use crate::core::FileIdentity;
 use anyhow::{Result, ensure};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+
+/// Read-only reconciliation of a locally persisted, fixed-root move proof.
+/// Absence is accepted only for an explicit NotFound, never for an IO error.
+pub fn observe(proof: &Value, root: &Path, retained: &Path) -> Result<&'static str> {
+    let original = PathBuf::from(
+        proof["original"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid_startup_proof"))?,
+    );
+    let saved = PathBuf::from(
+        proof["retained"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("invalid_startup_proof"))?,
+    );
+    ensure!(
+        original.parent() == Some(root) && saved.parent() == Some(retained),
+        "startup_scope_changed"
+    );
+    let _root = crate::platform::pin_directory(root)?;
+    fn state(path: &Path, proof: &Value) -> &'static str {
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => "absent",
+            Err(_) => "unreadable",
+            Ok(_) => match PinnedShortcut::inspect(path) {
+                Ok(p)
+                    if serde_json::from_value::<FileIdentity>(proof["identity"].clone())
+                        .is_ok_and(|i| i.same_object(&p.identity))
+                        && proof["digest"] == json!(p.digest.to_vec()) =>
+                {
+                    "matching"
+                }
+                _ => "changed_or_unsupported",
+            },
+        }
+    }
+    // The caller validates ownership of the retained directory before reaching here.
+    Ok(match (state(&original, proof), state(&saved, proof)) {
+        ("matching", "absent") => "original",
+        ("absent", "matching") => "retained",
+        _ => "conflict_or_unknown",
+    })
+}
 #[derive(Clone)]
 pub struct PinnedShortcut {
     pub path: PathBuf,

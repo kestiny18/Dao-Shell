@@ -29,3 +29,13 @@ checked_retained保留证明不被清理，核对回原位的旧证明可按原�
 ## 最终复验
 
 修复候选81c5ed2，独立检查158项PASS，桌面构建PASS；Reviewer确认R1关闭，无新阻塞finding。报告见 docs/reviews/2026-10-23-phase4-startup-recovery-verification.md。仅新增测试和报告归档，不改变被检生产候选。旧便携包不含此修复；第四期其余缺口不改变。
+
+## 2026-10-23 重新打包
+
+用户要求重新打包供另一台机器测试。包源码候选 `41ce0398a89b468953a883e64a2646499358e47a`，生产修复 `81c5ed2`，本次仅更新说明与归档，不改变执行代码。
+
+- `scripts/desktop.ps1 build`、`scripts/dev.ps1 build -CargoArgs @('--locked','--example','phase4_readonly')` PASS。
+- 包 `.tools/phase4-trial-41ce039.zip`，109512599 bytes，8个文件。ZIP CRC与6个载荷文件SHA256检查PASS；启动器PowerShell AST语法检查PASS，未在工作机启动实机测试。
+- ZIP SHA256：`4CB1C3FB46F42BE76D086DB7828D305F458D190AF709EC0D18E5BDC9053948A0`，同名 `.zip.sha256` 可核对。
+- Desktop exe SHA256：`0FB5B5AC7C405A0D1FAEBE5F59D415F9490473427C5841C2114407D6B3A3F3B7`，与独立复验产物一致。
+- 含独立配置启动器、只读探针、当前人工测试说明、R1独立报告、带历史提示的整期记录、manifest与SHA256SUMS。真实系统写入仍待用户在另一台机器验证；无推送、发布或环境安装。

@@ -4,6 +4,39 @@ A small desktop entry for understanding your computer and finding files with nat
 This is a Windows development preview. A single-file Windows x64 installer can
 be built for private trials; it is not a signed stable release.
 
+This document covers current source, including unpublished Phase 1–4 prototypes.
+The public v0.1.0 installer does not contain every capability below. The current
+[engineering audit fix plan](../docs/plans/2026-10-27-engineering-audit-fixes.md)
+records which fixes are implemented and tested; do not treat it as approval for
+real software changes or as clean-machine acceptance.
+
+Current maintenance controls can install, upgrade or uninstall software through
+the WinGet provider after exact-target local confirmation. The overview menu's
+Uninstall button still only opens Windows settings. Startup maintenance moves
+current-user Startup shortcuts to retained storage for an explicitly confirmed
+restore; it does not stop running apps. DNS maintenance clears the system resolver
+cache and does not prove that a network problem is fixed. Model requests cannot
+approve any of these actions. Uninstalling may remove application data; force
+termination may lose unsaved work. Unknown outcomes retain their receipts and
+must not be automatically repeated.
+
+Use the maintenance history's local check control to reconcile an uncertain result.
+Software checks require the source consent control and access the WinGet catalog;
+viewing history alone remains local. A successful check records the observed state
+and provider-idle evidence while retaining unknown historical attribution. Pending
+software operations block the same package across versions and installation scopes;
+unrelated file and application actions remain available. Another maintenance action
+still needs a new target-bound local confirmation.
+
+Results awaiting reboot need a later Windows boot sequence as well as provider-idle
+evidence. Older receipts without a boot baseline first record one and require a
+subsequent restart; reopening the application does not satisfy this requirement.
+WinGet queries run in an isolated worker with a 30-second deadline; writes have a
+900-second deadline. Stopping or timing out a write can stop the worker while the
+external installer continues, so its result remains unknown and is not replayed.
+These recovery paths have fixture tests; real WinGet changes and reboot recovery
+have not been accepted on a test machine.
+
 ## Try it on Windows
 
 For a shared trial build, double-click `Dao-Shell-0.1.0-windows-x64-setup.exe`,
@@ -36,6 +69,17 @@ The default model selector appears first. Each listed model can be edited, teste
 imported automatically. Saved changes apply between requests and reset all model execution contexts and
 file candidates; visible conversation history is retained.
 
+Settings → General also offers a local model token budget: by default each reply
+allows 2,048 output tokens and all conversations share 1,000,000 tokens for this
+application run. New conversations, context resets and model setting changes do
+not clear usage; restarting the application does. The usage display separates
+provider-reported totals from conservative reservations for missing usage,
+cancelled requests or uncertain failures. Insufficient budget blocks the next
+request before sending. Choose automatic output-limit compatibility or explicitly
+select `max_tokens` / `max_completion_tokens` for your provider. This is a local
+guard, not an account spending limit; provider billing and account limits remain
+authoritative. Cancelling a request does not cancel charges already incurred.
+
 Drag the divider to adjust sidebar width, or focus it and use the arrow keys;
 double-click restores the default. The computer overview offers cards or a list
 for registered apps, with local icons where available and initials otherwise.
@@ -48,8 +92,10 @@ Both rankings stay visible; viewing them does not sample again. The time/window,
 of processes lost between observations remain visible. Refresh is manual after the
 initial overview load; a failed refresh retains the dated previous snapshot. No
 process history is persisted. Model explanation is opt-in and sends the displayed
-system/disk facts and both top-ten lists (process names, PIDs and usage), not the
-application catalog. A high value alone does not identify a slowdown's cause.
+system/disk facts and both top-ten lists (process names and usage). The model
+projection excludes process IDs, executable paths and the application catalog.
+Overview explanation uses a separate request with no tools or conversation history.
+A high value alone does not identify a slowdown's cause.
 
 Registered applications use the page scroll
 and display all collected records (registry enumeration still has a safety bound).
@@ -116,8 +162,11 @@ receipt reports OS handoff, not proof that the target application displayed it.
 
 The fixed first tab is Overview (概览). New session creates a conversation in the
 sidebar; closing its tab preserves the session, and selecting it reopens the tab.
-Settings uses one closable tab. Hover or focus a session row to rename it; there is
-no session deletion control. Enter saves a name and Escape cancels editing. Names
+Settings uses one closable tab. Hover or focus a session row to rename or explicitly
+delete it. Deletion asks for local confirmation, waits for that session's request
+to stop, and removes its history and draft only after saving succeeds. Export all
+history and drafts first if you want a backup; deletion cannot be undone. Enter
+saves a name and Escape cancels editing. Names
 must be nonempty and fit within 512 UTF-8 bytes. Hover or focus a tab to reveal its
 close button. Closing the running session first asks to stop it,
 then waits for cancellation. Only one request runs at a time; other sessions can
@@ -139,7 +188,11 @@ No model call is made by restoration. Keys, raw model protocol, reasoning and
 capability tokens are excluded from the workspace schema. Text the user explicitly
 types remains ordinary visible history, so avoid typing secrets in conversations.
 
-Saving uses a synchronized temporary file and atomic replacement. Save errors stay
+Saving uses an exclusive workspace lock, a comparison with the last loaded/saved
+contents, a synchronized temporary file and atomic replacement. A second instance
+cannot overwrite the first, and external changes are reported as a conflict.
+Close the other instance and restart to resume saving; export unsaved content first.
+Save errors stay
 visible with a retry button; a failed rename retains its editor and previous name. Exit
 waits for pending saves and asks before leaving after a failure. If restoration
 fails because data is damaged or the version is unsupported, the original file is
@@ -147,6 +200,19 @@ preserved and automatic saving is blocked. Close the app, back up and move
 `workspace.json` out of the configuration directory, then restart to begin a new
 workspace. Do not remove the model configuration. Limits are 100 sessions,
 2,000 messages per session, 16,000 input characters and 8 MiB per workspace.
+New requests reserve space for replies and stop before sending when history is
+near capacity. Oversized replies remain visible in memory with a save warning.
+The export control writes all current history and drafts, including unsaved or
+oversized content, to a new JSON file in a locally chosen directory. It does not
+automatically import that backup. After exporting, delete unwanted sessions to
+free space, or shorten an oversized draft and retry saving.
+
+Before packaging a current source build, run
+`scripts/check-package-source.ps1 -Target desktop`. It creates a local successful
+check receipt only after the required checks pass. Packaging checks the source
+fingerprint before and after building, including relevant untracked source files,
+and refuses missing or stale evidence. The output's `.checks.json` records that
+evidence; it does not establish independent or clean-machine acceptance.
 
 ## Current scope
 

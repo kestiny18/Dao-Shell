@@ -14,6 +14,8 @@ _Interaction concept, not a running screenshot. File moves are a CLI capability.
 
 ## What you can try
 
+The table describes the published **v0.1.0** entry points. Current source also includes unpublished computer queries, short diagnostics, and prototypes for locally confirmed application launch, process termination, software installation/upgrade/uninstall, current-user Startup shortcut disable/restore, and DNS cache clearing. Models may propose these actions but cannot approve them. Uninstalling may remove application data and force termination may lose unsaved work. These additions are outside the old installer's verification scope. See the [desktop reference](desktop/README.md) and [current safety and recovery fixes](docs/plans/2026-10-27-engineering-audit-fixes.md).
+
 | Task | Windows desktop | CLI |
 | --- | --- | --- |
 | Find files | Natural language with a configured model, or literal file-name fallback | Natural language and direct search commands |
@@ -32,7 +34,7 @@ Restricted access searches selected, authorized folders. With Full access, a mat
 
 If the service is missing, incompatible or unavailable, searches use only the compatible folders listed in the receipt. Complex filters also use bounded folder searches while retaining their conditions. Coverage may be incomplete; receipts report scope, publication time and volume failures. Finding a name does not grant permission to inspect or open it: subsequent actions recheck access and file identity.
 
-A direct click on a current candidate uses the system default `open` handler, including HTML and executable files. Executables may run with normal Windows semantics. Model-initiated opening still asks locally. Ending a process has a separate confirmation and may lose unsaved work; protected, changed or unverifiable identities are refused. App Uninstall opens Windows settings rather than executing a registry uninstall command.
+A direct click on a current candidate uses the system default `open` handler, including HTML and executable files. Executables may run with normal Windows semantics. Model-initiated opening still asks locally. Ending a process has a separate confirmation and may lose unsaved work; protected, changed or unverifiable identities are refused. Uninstall in the overview application menu opens Windows settings. Current source also has a separate software maintenance entry that can actually uninstall through the WinGet provider after local confirmation; neither entry executes registry uninstall commands.
 
 ## Preview status
 

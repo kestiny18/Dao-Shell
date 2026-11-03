@@ -169,6 +169,8 @@ aside { overflow: hidden; gap: 14px; }
 .session-row > button { border: 0; background: transparent; }
 .session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 10px; }
 .session-rename { flex: 0 0 28px; padding: 6px; opacity: 0; pointer-events: none; }
+.session-delete { flex: 0 0 28px; padding: 6px; }
+#export-status { font-size: 12px; overflow-wrap: anywhere; }
 .session-row:hover .session-rename, .session-row:focus-within .session-rename { opacity: 1; pointer-events: auto; }
 .session-rename-form { display: flex; flex-wrap: wrap; width: 100%; gap: 3px; padding: 4px; }
 .session-rename-form input { width: 0; min-width: 40px; flex: 1; padding: 6px; }

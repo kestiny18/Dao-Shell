@@ -13,21 +13,33 @@ let mutatingWorkspace = false;
 let persistenceBlocked = false;
 let saveLoop = null;
 let pendingSave = null;
+let persistencePaused = false;
 const pageScroll = new Map();
 function session(id = workspace.active) { return workspace.sessions.find(s => s.id === id); }
 function state(id) { if (!runtime.has(id)) runtime.set(id,{items:[],confirmation:null,activity:t('app.ready'),contextLost:false,observations:[],actionTargets:null,actionReceipts:[],appConfirmation:null}); return runtime.get(id); }
 function pathText(path) { return String(path).replace(/^\\\\\?\\/, ''); }
 function nameOf(path) { return pathText(path).split(/[\\/]/).pop() || pathText(path); }
 function persistenceNotice(text) { $('workspace-status').textContent = text; $('workspace-status').hidden = !text; }
+function workspaceProblem(value, reserveId = null) {
+  const bytes = text => new TextEncoder().encode(text).length;
+  if (value.sessions.length > 100 || bytes(value.home_draft) > 64000 || value.sessions.some(s =>
+      bytes(s.draft) > 64000 || bytes(s.title) > 512 || s.messages.length > 2000 || s.messages.some(m => bytes(m.text) > 256000)) || bytes(JSON.stringify(value)) > 8*1024*1024) return t('workspace.quota');
+  const target = value.sessions.find(s => s.id === reserveId);
+  if (reserveId && ((target && target.messages.length > 1936) || bytes(JSON.stringify(value)) > 8*1024*1024-512*1024)) return t('workspace.reserve');
+  return '';
+}
 function persist() {
   if (!ready || !api) return Promise.resolve();
+  if (persistencePaused) return Promise.resolve();
   if (persistenceBlocked) return Promise.reject(Error(t('app.workspace_was_not_restored_and_cannot_be_saved_close_the_app_bac')));
+  const problem = workspaceProblem(workspace);
+  if (problem) { pendingSave = null; persistenceNotice(problem); return Promise.reject(Error(problem)); }
   pendingSave = JSON.parse(JSON.stringify(workspace));
   if (!saveLoop) {
     saveLoop = (async () => {
       while (pendingSave) {
         const value = pendingSave; pendingSave = null;
-        try { await api.invoke('save_workspace', {workspace:value}); persistenceNotice(''); }
+        try { await api.invoke('save_workspace', {workspace:value}); if (!workspaceProblem(workspace)) persistenceNotice(''); }
         catch (error) { pendingSave = null; persistenceNotice(t('app.not_saved_value_check_disk_space_and_configuration_folder_permis',{v0:(errorText(error))})); throw error; }
       }
     })().finally(() => { saveLoop = null; });
@@ -103,8 +115,9 @@ function renderNavigation() {
     const open = button(s.title, t('app.open_session_value',{v0:(s.title)}), () => selectTab(s.id)); open.dataset.page = 'files'; open.className = 'session-name';
     if (s.id === workspace.active) open.setAttribute('aria-current','page');
     const rename = button('✎',t('app.rename_session_value',{v0:(s.title)}),() => startRename(s.id)); rename.className = 'session-rename'; rename.dataset.renameId = s.id;
+    const remove = button('−',t('workspace.delete',{title:s.title}),() => deleteSession(s.id)); remove.className = 'session-delete'; remove.dataset.deleteId = s.id;
     if (renameEditor?.id === s.id) row.append(renameEditor.form);
-    else row.append(open,rename);
+    else row.append(open,rename,remove);
     $('session-list').append(row);
   }
   $('workspace-tabs').replaceChildren();
@@ -188,7 +201,7 @@ function setBusy(value) {
 }
 function message(text, role = 'assistant', error = false, id = workspace.active) {
   const s = session(id); if (!s) return;
-  s.messages.push({text:String(text).slice(0,64000),role,error});
+  s.messages.push({text:String(text),role,error});
   if (workspace.active === id) { $('welcome').hidden = true; renderMessage(s.messages.at(-1)); }
   saveSoon();
 }
@@ -246,6 +259,8 @@ function onEvent(event, request) {
 let creating = false;
 async function newSession() {
   if (!ready || creating || mutatingWorkspace) return null;
+  captureDraft();
+  if (workspace.sessions.length >= 100 || workspaceProblem(workspace)) { persistenceNotice(t('workspace.quota')); return null; }
   creating = true;
   try {
     const id = crypto.randomUUID(); if (api) await api.invoke('register_session',{sessionId:id});
@@ -256,6 +271,9 @@ async function newSession() {
 async function run(kind,input = '') {
   if (kind === 'explain' && !await ensureComputerSharing()) return;
   if (busy || !api || !ready || mutatingWorkspace) return;
+  captureDraft();
+  const problem = workspaceProblem(workspace, session()?.id || 'new');
+  if (problem || new TextEncoder().encode(input).length > 64000) { persistenceNotice(problem || t('workspace.quota')); return; }
   let id = session()?.id;
   if (!id) { id = await newSession(); if (!id || busy) return; workspace.home_draft = ''; }
   const s = session(id); s.draft = ''; $('input').value = '';
@@ -269,6 +287,7 @@ async function run(kind,input = '') {
     try {
       const reply = await api.invoke('perform',{sessionId:id,requestId:request.id,kind,input,onEvent:channel});
       if (activeRequest !== request || !session(id)) return;
+      if(reply.model_usage) $('budget-usage').textContent=t('budget.usage',{actual:reply.model_usage.actual_tokens,reserved:reply.model_usage.uncertain_reserved_tokens});
       for(const value of reply.maintenance_results || []) applyMaintenanceResult(value,request);
       for(const value of reply.action_targets || []) applyApplicationResult('app_targets',value,request);
       for(const value of reply.action_receipts || []) applyApplicationResult('app_action_receipt',value,request);
@@ -339,6 +358,37 @@ async function closeTab(id) {
   } catch (error) { persistenceNotice(errorText(error)); }
   finally { mutatingWorkspace = false; document.querySelector('.shell').inert = false; }
 }
+async function exportWorkspace() {
+  if (!api || !ready) return;
+  captureDraft();
+  try {
+    const path = await api.invoke('export_workspace',{workspace:JSON.parse(JSON.stringify(workspace))});
+    $('export-status').textContent = path ? t('workspace.exported',{path}) : t('workspace.export_cancelled');
+  } catch (error) { $('export-status').textContent = errorText(error); }
+}
+async function deleteSession(id) {
+  if (mutatingWorkspace || creating || renameEditor?.saving || !session(id) || persistenceBlocked) return;
+  if (activeRequest && activeRequest.sessionId !== id) { persistenceNotice(t('workspace.wait')); return; }
+  if (!await ask(t('workspace.delete_confirm',{title:session(id).title}))) return;
+  mutatingWorkspace = true; document.querySelector('.shell').inert = true;
+  try {
+    if (activeRequest?.sessionId === id) await stopRequest();
+    persistencePaused = true;
+    if (saveLoop) await saveLoop.catch(() => {});
+    pendingSave = null;
+    captureDraft();
+    const next = JSON.parse(JSON.stringify(workspace));
+    next.sessions = next.sessions.filter(s => s.id !== id);
+    next.tabs = next.tabs.filter(tab => tab !== id);
+    if (next.active === id) next.active = next.tabs.at(-1) || 'home';
+    await api.invoke('delete_session',{sessionId:id,workspace:next});
+    workspace = next; runtime.delete(id); pageScroll.delete(id);
+    if (renameEditor?.id === id) renameEditor = null;
+    persistenceNotice(''); renderCurrent();
+  } catch (error) { persistenceNotice(errorText(error)); }
+  finally { persistencePaused = false; mutatingWorkspace = false; document.querySelector('.shell').inert = false; }
+}
+$('export-workspace').addEventListener('click',exportWorkspace);
 $('composer').addEventListener('submit',event => { event.preventDefault(); const input = $('input').value.trim(); if (input) run('say',input); });
 $('input').addEventListener('input',() => { captureDraft(); saveSoon(); });
 $('input').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); $('composer').requestSubmit(); } });

@@ -33,6 +33,7 @@ pub struct Bridge {
 struct Sessions {
     contexts: HashMap<String, FileSession>,
     registered: HashSet<String>,
+    deleting: HashSet<String>,
     configuration: String,
 }
 struct Release<'a>(&'a Bridge);
@@ -96,17 +97,74 @@ impl Bridge {
         Ok(value)
     }
     pub fn save_workspace(&self, value: Workspace) -> Result<(), String> {
+        let sessions = self.sessions.lock().map_err(error)?;
+        if value
+            .sessions
+            .iter()
+            .any(|s| !sessions.registered.contains(&s.id))
+        {
+            return Err("workspace_stale_session: 已删除或未登记的会话不能重新保存".into());
+        }
         self.workspace
             .lock()
             .map_err(error)?
             .save(&value)
             .map_err(error)
     }
+    pub fn delete_session(&self, id: &str, value: Workspace) -> Result<(), String> {
+        {
+            let owner = self.active.lock().map_err(error)?;
+            let mut sessions = self.sessions.lock().map_err(error)?;
+            if !sessions.registered.contains(id) || !sessions.deleting.insert(id.into()) {
+                return Err("会话不存在或正在删除".into());
+            }
+            if owner.as_ref().is_some_and(|(session, _)| session == id) {
+                self.control.cancel();
+            }
+        }
+        let result = (|| {
+            let began = std::time::Instant::now();
+            loop {
+                let owner = self.active.lock().map_err(error)?;
+                if let Some((active, _)) = owner.as_ref() {
+                    if active != id || began.elapsed() >= Duration::from_secs(10) {
+                        return Err("workspace_request_active: 请求尚未结束，请等待完成后再删除；原内容保留".into());
+                    }
+                    drop(owner);
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+                let mut sessions = self.sessions.lock().map_err(error)?;
+                if value
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == id || !sessions.registered.contains(&s.id))
+                {
+                    return Err("workspace_stale_session: 删除快照包含失效会话".into());
+                }
+                // Commit while admission is held. Runtime ownership changes only
+                // after durable save, so errors cannot strand or revive a session.
+                self.workspace
+                    .lock()
+                    .map_err(error)?
+                    .save(&value)
+                    .map_err(error)?;
+                sessions.contexts.remove(id);
+                sessions.registered.remove(id);
+                return Ok(());
+            }
+        })();
+        self.sessions.lock().map_err(error)?.deleting.remove(id);
+        result
+    }
     pub fn register(&self, id: String) -> Result<(), String> {
         uuid::Uuid::parse_str(&id).map_err(error)?;
         let mut sessions = self.sessions.lock().map_err(error)?;
+        if sessions.registered.contains(&id) {
+            return Ok(());
+        }
         if sessions.registered.len() >= 100 {
-            return Err("会话数量已达 100，请继续使用已有会话".into());
+            return Err("workspace_quota: 会话数量已达 100，请先导出并删除不需要的会话".into());
         }
         sessions.registered.insert(id);
         Ok(())
@@ -239,7 +297,6 @@ impl Bridge {
             "prepare" if !confirmed => {
                 self.reserve()?;
                 let result = (|| {
-                    self.require_no_pending_maintenance()?;
                     let mut catalog = self.processes.lock().map_err(error)?;
                     let value = catalog.prepare(reference)?;
                     if self.control.cancellation().is_cancelled() {
@@ -269,23 +326,15 @@ impl Bridge {
     pub fn application_action(&self, id: &str, action: &str) -> Result<Value, String> {
         self.reserve()?;
         let _release = Release(self);
-        self.require_no_pending_maintenance()?;
-        self.applications
-            .lock()
+        let excluded_environment = Config::load(&self.path())
             .map_err(error)?
-            .execute(id, action, &self.control.cancellation())
-    }
-    fn require_no_pending_maintenance(&self) -> Result<(), String> {
-        let directory = self.path().with_file_name("maintenance");
-        if !directory.exists() {
-            return Ok(());
-        }
-        let engine = dao_shell::software::engine::Engine::open(&directory)
-            .map_err(|_| "maintenance_journal_unavailable")?;
-        if engine.unresolved().map_err(error)? {
-            return Err("maintenance_reconciliation_required".into());
-        }
-        Ok(())
+            .credential_environment_names();
+        self.applications.lock().map_err(error)?.execute(
+            id,
+            action,
+            &self.control.cancellation(),
+            &excluded_environment,
+        )
     }
     pub fn test(&self, request: ConnectionTest) -> Result<Value, String> {
         self.reserve()?;
@@ -309,13 +358,8 @@ impl Bridge {
     pub fn reserve_for(&self, session_id: &str, request_id: &str) -> Result<(), String> {
         uuid::Uuid::parse_str(request_id).map_err(error)?;
         let mut owner = self.active.lock().map_err(error)?;
-        if !self
-            .sessions
-            .lock()
-            .map_err(error)?
-            .registered
-            .contains(session_id)
-        {
+        let sessions = self.sessions.lock().map_err(error)?;
+        if !sessions.registered.contains(session_id) || sessions.deleting.contains(session_id) {
             return Err("会话不存在".into());
         }
         self.control.reserve().map_err(error)?;
@@ -588,7 +632,116 @@ impl Interaction for DesktopInteraction<'_> {
 mod tests {
     use super::*;
     #[test]
-    fn unknown_maintenance_blocks_legacy_launch_and_termination_entries() {
+    fn deletion_releases_capacity_only_after_save_and_rejects_queued_old_snapshots() {
+        use dao_shell::workspace::Session;
+        let dir = tempfile::tempdir().unwrap();
+        let bridge = Bridge::with_path(dir.path().join("config.json"));
+        let mut value = bridge.load_workspace().unwrap();
+        for _ in 0..100 {
+            let id = uuid::Uuid::new_v4().to_string();
+            bridge.register(id.clone()).unwrap();
+            value.sessions.push(Session {
+                id,
+                title: "fixture".into(),
+                draft: "keep".into(),
+                messages: vec![],
+            });
+        }
+        bridge.save_workspace(value.clone()).unwrap();
+        let id = value.sessions[0].id.clone();
+        bridge.sessions.lock().unwrap().contexts.insert(
+            id.clone(),
+            FileSession::new(&Config::default(), Default::default()).unwrap(),
+        );
+        assert!(bridge.register(uuid::Uuid::new_v4().to_string()).is_err());
+        let mut invalid = value.clone();
+        invalid.sessions.remove(0);
+        invalid.home_draft = "x".repeat(64001);
+        assert!(bridge.delete_session(&id, invalid).is_err());
+        assert_eq!(bridge.sessions.lock().unwrap().registered.len(), 100);
+        assert!(bridge.sessions.lock().unwrap().contexts.contains_key(&id));
+        assert!(!bridge.sessions.lock().unwrap().deleting.contains(&id));
+        let mut next = value.clone();
+        next.sessions.remove(0);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let path = dir.path().join("workspace.json");
+            let before = std::fs::read(&path).unwrap();
+            let held = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&path)
+                .unwrap();
+            assert!(bridge.delete_session(&id, next.clone()).is_err());
+            assert!(bridge.sessions.lock().unwrap().contexts.contains_key(&id));
+            assert!(bridge.sessions.lock().unwrap().registered.contains(&id));
+            drop(held);
+            assert_eq!(std::fs::read(path).unwrap(), before);
+        }
+        bridge.delete_session(&id, next).unwrap();
+        assert!(!bridge.sessions.lock().unwrap().contexts.contains_key(&id));
+        assert_eq!(bridge.sessions.lock().unwrap().registered.len(), 99);
+        assert!(
+            bridge
+                .save_workspace(value)
+                .unwrap_err()
+                .contains("workspace_stale_session")
+        );
+        bridge.register(uuid::Uuid::new_v4().to_string()).unwrap();
+        assert_eq!(
+            bridge
+                .workspace
+                .lock()
+                .unwrap()
+                .load()
+                .unwrap()
+                .sessions
+                .len(),
+            99
+        );
+    }
+    #[test]
+    fn deleting_an_active_session_cancels_and_waits_before_removing_runtime() {
+        use dao_shell::workspace::Session;
+        let dir = tempfile::tempdir().unwrap();
+        let bridge = std::sync::Arc::new(Bridge::with_path(dir.path().join("config.json")));
+        let mut value = bridge.load_workspace().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        bridge.register(id.clone()).unwrap();
+        value.sessions.push(Session {
+            id: id.clone(),
+            title: "fixture".into(),
+            draft: String::new(),
+            messages: vec![],
+        });
+        bridge.save_workspace(value).unwrap();
+        bridge
+            .reserve_for(&id, &uuid::Uuid::new_v4().to_string())
+            .unwrap();
+        let child = bridge.clone();
+        let child_id = id.clone();
+        let task =
+            std::thread::spawn(move || child.delete_session(&child_id, Workspace::default()));
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !bridge.control.cancellation().is_cancelled() && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(bridge.control.cancellation().is_cancelled());
+        assert!(bridge.sessions.lock().unwrap().registered.contains(&id));
+        assert!(
+            bridge
+                .reserve_for(&id, &uuid::Uuid::new_v4().to_string())
+                .is_err()
+        );
+        assert!(!task.is_finished());
+        drop(Release(&bridge));
+        task.join().unwrap().unwrap();
+        assert!(!bridge.sessions.lock().unwrap().registered.contains(&id));
+    }
+    #[test]
+    fn unknown_maintenance_does_not_bypass_target_validation_or_block_unrelated_entries() {
         let directory = tempfile::tempdir().unwrap();
         let bridge = Bridge::with_path(directory.path().join("config.json"));
         let mut engine =
@@ -604,13 +757,13 @@ mod tests {
             .unwrap();
         drop(engine);
         assert!(
-            bridge
+            !bridge
                 .application_action("not-a-real-target", "launch")
                 .unwrap_err()
                 .contains("maintenance_reconciliation_required")
         );
         assert!(
-            bridge
+            !bridge
                 .process_action("prepare", "not-a-real-target", false)
                 .unwrap_err()
                 .contains("maintenance_reconciliation_required")

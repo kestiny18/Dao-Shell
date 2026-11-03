@@ -132,6 +132,8 @@ async function loadSettings() {
     $('computer-query-sharing').value = settingsView.config.computer_query_sharing || 'ask';
     renderDirectories();
     $('appearance').value = settingsView.config.appearance;
+    const budget=settingsView.config.model_budget || {output_tokens:2048,run_tokens:1000000,output_parameter:'auto'};
+    $('budget-output').value=budget.output_tokens; $('budget-run').value=budget.run_tokens; $('budget-parameter').value=budget.output_parameter;
     $('ui-language').value = settingsView.config.ui_language || 'auto';
     applyAppearance(settingsView.config.appearance);
     renderModels(); accessDescription(); settingsNotice('');
@@ -192,6 +194,7 @@ $('settings-form').addEventListener('submit', async (event) => {
   storeModel(); renderActiveModels();
   const config = settingsView.config;
   const newlyFull=savedAccessMode!=='full' && $('access-mode').value==='full';
+  config.model_budget={output_tokens:Number($('budget-output').value),run_tokens:Number($('budget-run').value),output_parameter:$('budget-parameter').value};
   config.computer_query_sharing = $('computer-query-sharing').value;
   config.access_mode = $('access-mode').value; config.appearance = $('appearance').value; config.ui_language=$('ui-language').value;
   setBusy(true);

@@ -66,10 +66,12 @@ impl Catalog {
         id: &str,
         action: &str,
         cancel: &dao_shell::core::Cancellation,
+        excluded_environment: &[String],
     ) -> Result<Value, String> {
         self.execute_with(id, action, |action, path| {
             cancel.check().map_err(|e| e.to_string())?;
-            dispatch(action, path)
+            dao_shell::shell_handoff::application(action, path, excluded_environment, cancel)
+                .map_err(|e| e.to_string())
         })
     }
     fn execute_with(
@@ -224,7 +226,7 @@ mod tests {
         assert_eq!(result["status"], "handed_off");
         let cancel = dao_shell::core::Cancellation::default();
         cancel.cancel();
-        assert!(c.execute("fixture", "uninstall", &cancel).is_err());
+        assert!(c.execute("fixture", "uninstall", &cancel, &[]).is_err());
     }
     #[test]
     fn changed_link_or_exe_rejects_without_dispatch() {
@@ -294,78 +296,5 @@ mod tests {
             HashMap::from([("fixture".into(), vec![Some(t)])]),
         );
         assert!(c.targets.values().all(Option::is_none));
-    }
-}
-#[cfg(not(windows))]
-fn dispatch(_: &str, _: Option<&Path>) -> Result<bool, String> {
-    Err("此操作仅支持 Windows".into())
-}
-#[cfg(windows)]
-fn dispatch(action: &str, path: Option<&Path>) -> Result<bool, String> {
-    use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize};
-    use windows::{
-        Win32::{
-            Foundation::ERROR_CANCELLED,
-            System::Com::CoTaskMemFree,
-            UI::{
-                Shell::{
-                    SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, SHOpenFolderAndSelectItems,
-                    SHParseDisplayName, ShellExecuteExW,
-                },
-                WindowsAndMessaging::SW_SHOWNORMAL,
-            },
-        },
-        core::PCWSTR,
-    };
-    struct Apartment;
-    impl Drop for Apartment {
-        fn drop(&mut self) {
-            unsafe { CoUninitialize() };
-        }
-    }
-    unsafe {
-        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-            .ok()
-            .map_err(|e| e.to_string())?;
-    }
-    let _apartment = Apartment;
-    let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-    let target = wide(
-        &path
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "ms-settings:appsfeatures".into()),
-    );
-    if action == "location" {
-        let mut pidl = std::ptr::null_mut();
-        unsafe {
-            SHParseDisplayName(PCWSTR(target.as_ptr()), None, &mut pidl, 0, None)
-                .map_err(|e| e.to_string())?;
-        }
-        let result = unsafe { SHOpenFolderAndSelectItems(pidl, None, 0) };
-        unsafe {
-            CoTaskMemFree(Some(pidl.cast()));
-        }
-        return result.map(|_| true).map_err(|e| e.to_string());
-    }
-    let verb = wide(if action == "admin" { "runas" } else { "open" });
-    let directory = path
-        .and_then(Path::parent)
-        .map(|p| wide(&p.to_string_lossy()));
-    let info = SHELLEXECUTEINFOW {
-        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_NOASYNC,
-        lpVerb: PCWSTR(verb.as_ptr()),
-        lpFile: PCWSTR(target.as_ptr()),
-        lpDirectory: directory
-            .as_ref()
-            .map_or(PCWSTR::null(), |s| PCWSTR(s.as_ptr())),
-        nShow: SW_SHOWNORMAL.0,
-        ..Default::default()
-    };
-    let mut info = info;
-    match unsafe { ShellExecuteExW(&mut info) } {
-        Ok(()) => Ok(true),
-        Err(e) if e.code() == windows::core::HRESULT::from_win32(ERROR_CANCELLED.0) => Ok(false),
-        Err(e) => Err(format!("Windows 未接受操作：{e}")),
     }
 }

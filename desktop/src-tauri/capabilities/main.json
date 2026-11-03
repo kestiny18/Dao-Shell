@@ -20,6 +20,8 @@
     "core:event:default",
     "allow-load-workspace",
     "allow-save-workspace",
+    "allow-delete-session",
+    "allow-export-workspace",
     "allow-register-session",
     "allow-finish-close",
     "allow-choose-directory",

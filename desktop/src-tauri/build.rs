@@ -8,6 +8,8 @@ fn main() {
             "session_info",
             "load_workspace",
             "save_workspace",
+            "delete_session",
+            "export_workspace",
             "register_session",
             "finish_close",
             "choose_directory",

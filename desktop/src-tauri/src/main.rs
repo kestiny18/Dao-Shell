@@ -146,6 +146,42 @@ fn register_session(state: State<'_, Arc<Bridge>>, session_id: String) -> Result
 }
 
 #[tauri::command]
+async fn delete_session(
+    state: State<'_, Arc<Bridge>>,
+    session_id: String,
+    workspace: dao_shell::workspace::Workspace,
+) -> Result<(), String> {
+    let bridge = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || bridge.delete_session(&session_id, workspace))
+        .await
+        .map_err(|_| "删除会话请求中断".to_string())?
+}
+
+#[tauri::command]
+async fn export_workspace(
+    window: tauri::Window,
+    workspace: dao_shell::workspace::Workspace,
+) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    let owner = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+    #[cfg(not(windows))]
+    let owner = {
+        let _ = window;
+        0
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(directory) = directory::choose(owner)? else {
+            return Ok(None);
+        };
+        dao_shell::workspace::export(&workspace, std::path::Path::new(&directory))
+            .map(|path| Some(path.to_string_lossy().into_owned()))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|_| "导出请求中断".to_string())?
+}
+
+#[tauri::command]
 fn get_settings(state: State<'_, Arc<Bridge>>) -> Result<SettingsView, String> {
     state.settings()
 }
@@ -242,6 +278,12 @@ async fn inventory_command(
         .map_err(|_| "目录记录请求中断".to_string())?
 }
 fn main() {
+    if let Some(code) = dao_shell::software::isolated::run_internal_mode() {
+        std::process::exit(code);
+    }
+    if let Some(code) = dao_shell::shell_handoff::run_internal_mode() {
+        std::process::exit(code);
+    }
     tauri::Builder::default()
         .manage(Arc::new(Bridge::new()))
         .invoke_handler(tauri::generate_handler![
@@ -254,6 +296,8 @@ fn main() {
             load_workspace,
             save_workspace,
             register_session,
+            delete_session,
+            export_workspace,
             perform,
             confirm_open,
             confirm_maintenance,

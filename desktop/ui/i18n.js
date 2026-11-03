@@ -11,8 +11,18 @@ const messages = {
   "maintenance.startup":{"zh": "查询可禁用/恢复的启动项", "en": "Find Startup entries to disable/restore"},
   "maintenance.startup_check_retained":{"zh":"只读核对：原位置为空，保留文件身份及内容匹配。上次操作结果仍未知；恢复需要新的本地确认。","en":"Read-only check: original location is empty and the retained file identity and content match. The previous outcome remains unknown; restore needs a new local confirmation."},
   "maintenance.startup_check_original":{"zh":"只读核对：原位置文件身份及内容匹配，保留位置为空。上次操作结果仍未知；没有自动重放。","en":"Read-only check: the original file identity and content match and the retained location is empty. The previous outcome remains unknown; no action was replayed."},
-  "maintenance.startup_check_conflict_or_unknown":{"zh":"只读核对：两端冲突、文件变化或无法可靠检查；保持未知并阻止维护操作。","en":"Read-only check: conflicting locations, changed files or an unreliable check. The outcome stays unknown and maintenance remains blocked."},
+  "maintenance.startup_check_conflict_or_unknown":{"zh":"只读核对：两端冲突、文件变化或无法可靠检查；保持未知并阻止相关启动项的维护操作。","en":"Read-only check: conflicting locations, changed files or an unreliable check. The outcome stays unknown and maintenance for the related Startup target remains blocked."},
   "maintenance.history":{"zh": "查看维护回执", "en": "View maintenance receipts"},
+  "maintenance.reconcile":{"zh":"核对结果（软件会连接 WinGet 源）","en":"Check outcome (software connects to WinGet)"},
+  "maintenance.checked_unknown":{"zh":"已核对当前状态，原操作结果仍未知；不会自动重试","en":"Current state checked; original outcome remains unknown. No automatic retry."},
+  "maintenance.baseline_recorded_restart_required":{"zh":"旧回执没有重启基线，现已记录。请在以后重启 Windows 后再核对；本次不解除等待重启。","en":"The old receipt had no restart baseline. One is now recorded. Check again after a subsequent Windows restart; this check does not clear the restart requirement."},
+  "maintenance.new_boot_not_observed":{"zh":"尚未证实新的 Windows 启动，仍需重启后核对。","en":"A new Windows boot has not been verified. Check again after restart."},
+  "maintenance.new_boot_observed":{"zh":"已观测新的 Windows 启动；仍须提供者空闲且当前状态可核对，原操作归因保持未知。","en":"A new Windows boot was observed. Provider idle and current state checks are still required; original attribution stays unknown."},
+  "maintenance.provider_busy_or_unknown":{"zh":"未证实提供者空闲，相关软件操作仍被保护。","en":"Provider idle has not been proved. Related software actions remain blocked."},
+  "maintenance.boot_evidence_unavailable":{"zh":"无法读取系统启动证据，保持等待重启；没有记录有效基线。","en":"System boot evidence is unavailable. The restart requirement remains; no valid baseline was recorded."},
+  "maintenance.observed_present":{"zh":"本次核对：已安装 {version}（{scope}）。","en":"Current check: installed version {version} ({scope})."},
+  "maintenance.observed_absent":{"zh":"本次核对：目标范围未安装（{scope}）。","en":"Current check: absent in the target scope ({scope})."},
+  "maintenance.observed_unknown":{"zh":"本次核对：安装状态仍未知。","en":"Current check: installation state remains unknown."},
   "maintenance.dns":{"zh": "准备清理 DNS 缓存", "en": "Prepare DNS cache clearing"},
   "maintenance.risk":{"zh": "维护可能影响软件数据和系统状态。请核对来源、版本、范围及下方具体影响。取消不保证已运行的安装器停止；未知结果不可重试。", "en": "Maintenance may affect application data and system state. Check the source, version, scope and effects below. Cancellation may not stop a running installer; never retry an unknown outcome."},
   "maintenance.dns_risk":{"zh": "清理本机所有应用使用的系统 DNS 解析缓存，无法恢复原缓存。不会改变 DNS 服务器、代理或 IP，也不保证网络恢复。", "en": "Clears the system DNS resolver cache used by all applications on this computer. The old cache cannot be restored. DNS servers, proxy and IP settings remain unchanged; connectivity is not guaranteed."},
@@ -1749,6 +1759,17 @@ messages['language.note']={zh:'跟随系统时，中文系统使用简体中文�
 messages['error.unknown']={zh:'操作未完成。请重试；若仍失败，请检查设置或诊断报告。',en:'The operation did not complete. Retry; if it persists, check settings or the diagnostic report.'};
 messages['error.detail']={zh:'操作未完成：{detail}',en:'The operation did not complete: {detail}'};
 
+messages['workspace.export']={zh:'导出全部历史与草稿',en:'Export all history and drafts'};
+messages['workspace.exported']={zh:'已导出：{path}',en:'Exported: {path}'};
+messages['workspace.export_cancelled']={zh:'已取消导出',en:'Export cancelled'};
+messages['workspace.delete']={zh:'删除会话：{title}',en:'Delete session: {title}'};
+messages['workspace.delete_confirm']={zh:'删除“{title}”及其历史和草稿？运行中的请求将先停止并等待结束。建议先导出；删除不能撤销。',en:'Delete “{title}”, including its history and draft? Any running request will be stopped and awaited first. Export first if needed; deletion cannot be undone.'};
+messages['workspace.quota']={zh:'历史或草稿已达保存上限（100 会话、每会话 2000 条消息、草稿 64 KB、总计 8 MiB）。内容仍在内存中；请先导出，再删除不需要的会话或缩短草稿，然后重试保存。',en:'History or drafts exceed storage limits (100 sessions, 2,000 messages per session, 64 KB drafts, 8 MiB total). Content remains in memory. Export it, delete unwanted sessions or shorten drafts, then retry saving.'};
+messages['workspace.reserve']={zh:'历史接近保存上限，本次请求尚未发送。请先导出，再新建会话或删除不需要的历史，为返回内容留出空间。',en:'History is near the storage limit. This request has not been sent. Export it, then start a new session or delete unwanted history to leave space for the response.'};
+messages['workspace.wait']={zh:'请求尚未结束，请等待完成后再删除；原内容保留。',en:'A request is still running. Wait for it to finish before deleting. The original content is retained.'};
+messages['workspace.in_use']={zh:'另一窗口正在使用此工作区。请关闭另一窗口再重启；当前未保存内容仍可导出。',en:'Another window is using this workspace. Close that window and restart. You can still export unsaved content.'};
+messages['workspace.conflict']={zh:'工作区已在外部改变，未覆盖。请导出当前内容并重启以读取磁盘版本。',en:'The workspace changed outside this window and was not overwritten. Export current content and restart to load the disk version.'};
+messages['workspace.stale']={zh:'保存快照包含已删除或未登记的会话，未覆盖现有历史。请重试保存。',en:'The snapshot contains a deleted or unregistered session. Existing history was not overwritten. Retry saving.'};
 const backendMessages = {
   "backend.0": {
     "zh": "接口计数器的短时采样；已配置 IP 不代表互联网可用，不主动发起联网探测。",
@@ -2427,6 +2448,11 @@ function localBuiltin(value) {
 }
 function errorText(value) {
   const text=String(value ?? '');
+  if(text.startsWith('workspace_in_use:'))return t('workspace.in_use');
+  if(text.startsWith('workspace_conflict:'))return t('workspace.conflict');
+  if(text.startsWith('workspace_quota:'))return t('workspace.quota');
+  if(text.startsWith('workspace_stale_session:'))return t('workspace.stale');
+  if(text.startsWith('workspace_request_active:'))return t('workspace.wait');
   if(text==='maintenance_reconciliation_required')return t('maintenance.unknown');
   if(text==='side_effect_already_attempted')return t('maintenance.turn_limit');
   if(text==='software_source_confirmation_required')return t('maintenance.source_required');
@@ -2447,3 +2473,10 @@ function errorText(value) {
   if(!/[\u3400-\u9fff]/.test(text))return t('error.detail',{detail:text});
   return t('error.unknown');
 }
+
+messages['budget.title']={zh:'模型用量预算',en:'Model usage budget'};
+messages['budget.output']={zh:'每次请求输出 token 上限',en:'Output tokens per request'};
+messages['budget.run']={zh:'本次应用运行 token 预算',en:'Tokens per application run'};
+messages['budget.parameter']={zh:'输出限制参数',en:'Output limit parameter'};
+messages['budget.note']={zh:'所有会话共享本次运行预算。新建或重置会话不清零；重启应用会清零。未知用量保留预留值，不表示免费。实际计费以服务商为准，账户费用需在服务商侧限制。',en:'All chats share this run’s budget. New chats and resets keep usage; restarting the app resets it. Unknown usage stays reserved and is not free. Provider billing is authoritative; use provider account limits to control spending.'};
+messages['budget.usage']={zh:'本次运行：已报告 {actual} token；未知用量保守预留 {reserved} token。',en:'This run: {actual} reported tokens; {reserved} tokens reserved for unknown usage.'};

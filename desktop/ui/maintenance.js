@@ -49,7 +49,18 @@ function renderMaintenance(st) {
     }
     if(value.items?.length===0){const note=document.createElement('p');note.textContent=t('maintenance.empty');result.append(note);}
     for(const receipt of value.receipts || (value.operation_id?[value]:[])){
-      const note=document.createElement('p');const status=['verified','failed','cancelled_before_dispatch','awaiting_user','awaiting_reboot'].includes(receipt.lifecycle)?receipt.lifecycle:'unknown';note.textContent=`${receipt.operation || ''} · ${receipt.package?.package_id || ''} ${receipt.package?.version || ''}\n${t(`maintenance.${status}`)}${receipt.operation==='flush_dns_cache'?`\n${t('maintenance.dns_report')}`:''}${receipt.persistence_warning?`\n${t('maintenance.warning')}`:''}`;result.append(note);
+      const note=document.createElement('p');const status=['verified','failed','cancelled_before_dispatch','awaiting_user','awaiting_reboot','checked_unknown'].includes(receipt.lifecycle)?receipt.lifecycle:'unknown';note.textContent=`${receipt.operation || ''} · ${receipt.package?.package_id || ''} ${receipt.package?.version || ''}\n${t(`maintenance.${status}`)}${receipt.operation==='flush_dns_cache'?`\n${t('maintenance.dns_report')}`:''}${receipt.persistence_warning?`\n${t('maintenance.warning')}`:''}`;result.append(note);
+      if(['unknown','dispatching','dispatched','awaiting_user','awaiting_reboot'].includes(receipt.lifecycle)) {
+        const software=['install','upgrade','uninstall'].includes(receipt.operation);
+        const check=button(t('maintenance.reconcile'),t('maintenance.reconcile'),()=>run('maintenance-local',JSON.stringify({kind:'reconcile',operation_id:receipt.operation_id,...(software?{source_ref:st.maintenanceSource}:{})})));
+        check.disabled=busy || (software && !st.maintenanceSource);result.append(check);
+      }
+      if(receipt.last_check) {
+        const check=receipt.last_check;
+        if(['baseline_recorded_restart_required','new_boot_not_observed','new_boot_observed','boot_evidence_unavailable'].includes(check.boot_status)){const line=document.createElement('p');line.textContent=t(`maintenance.${check.boot_status}`);result.append(line);}
+        if(check.observed_state){const observed=check.observed_state,line=document.createElement('p');line.textContent=observed.state==='present'?t('maintenance.observed_present',{version:observed.identity?.version || '?',scope:observed.identity?.scope || '?'}):observed.state==='absent_verified'?t('maintenance.observed_absent',{scope:observed.scope}):t('maintenance.observed_unknown');result.append(line);}
+        if(check.provider_idle===false){const line=document.createElement('p');line.textContent=t('maintenance.provider_busy_or_unknown');result.append(line);}
+      }
       if(receipt.startup_check){const checked=document.createElement('p');checked.textContent=t(`maintenance.startup_check_${['retained','original'].includes(receipt.startup_check.placement)?receipt.startup_check.placement:'conflict_or_unknown'}`);result.append(checked);}
     }
     if(value.status==='cancelled_before_dispatch'){const note=document.createElement('p');note.textContent=t('maintenance.cancelled_before_dispatch');result.append(note);}

@@ -22,6 +22,8 @@ async function fixture(options = {}) {
     if(command==='index_service_command') return options.indexService ? options.indexService(args) : {state:'not_installed',enabled:false,payload_ready:false,volumes:[]};
     if (command === 'load_workspace') { if (options.loadFailure) throw Error('broken workspace'); return clone(savedWorkspace); }
     if (command === 'save_workspace') { if (saveGate) await saveGate; if (saveFailure) throw Error('disk full'); savedWorkspace = clone(args.workspace); return; }
+    if (command === 'delete_session') { if (saveFailure) throw Error('disk full'); savedWorkspace = clone(args.workspace); return; }
+    if (command === 'export_workspace') return options.exportPath ?? 'C:\\fixture\\export.json';
     if (['register_session','finish_close'].includes(command)) return;
     if (command === 'session_info') return { roots:current.config.read_roots, model:options.noModel ? null : 'fixture-model', model_error:options.noModel ? '未配置模型' : null, access_mode:current.config.access_mode };
     if (command === 'get_settings') return {...clone(current),effective_language:current.config.ui_language==='en'?'en':current.config.ui_language==='zh-CN'?'zh-CN':options.systemLanguage || 'zh-CN'};
@@ -57,6 +59,91 @@ async function fixture(options = {}) {
   const submit = (id) => $(id).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
   return {dom,w,$,calls,tick,change,submit,events,windowEvents,saved:()=>clone(savedWorkspace),failSave:value=>{saveFailure=value;},holdSave:()=>{let release;saveGate=new Promise(resolve=>{release=resolve;});return ()=>{saveGate=null;release();};},finishRequest:()=>pending?.({message:'本轮已取消',error:true,items:[]})};
 }
+
+for (const failed of [false,true]) test(`delete drains queued snapshots and ${failed?'preserves history on failure':'removes history after commit'}`,async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());
+  f.$('reset').click();await f.tick();const id=f.saved().active;
+  const release=f.holdSave();
+  f.$('input').value='latest unsaved draft';f.$('input').dispatchEvent(new f.w.Event('input'));await f.tick();
+  f.w.document.querySelector(`[data-delete-id="${id}"]`).click();await f.tick();f.$('decision-yes').click();await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='delete_session').length,0);
+  f.failSave(failed);release();await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='delete_session').length,1);
+  assert.equal(f.w.eval('workspace.sessions.length'),failed?1:0);
+  if(failed) { assert.equal(f.$('input').value,'latest unsaved draft');f.failSave(false);f.$('retry-save').click();await f.tick();assert.equal(f.saved().sessions[0].draft,'latest unsaved draft'); }
+  else { f.$('retry-save').click();await f.tick();assert.equal(f.saved().sessions.length,0);assert.equal(f.w.eval(`runtime.has('${id}')`),false); }
+});
+
+test('maintenance recovery requires local source consent and preserves reboot uncertainty in both languages',async(t)=>{
+ for(const language of ['zh-CN','en']) {
+  let checked=false;
+  const receipt={operation_id:'fixture-recovery',operation:'install',package:{package_id:'Synthetic.Fixture',version:'1'},lifecycle:'awaiting_reboot'};
+  const f=await fixture({systemLanguage:language,perform:async(args)=>{
+   const local=JSON.parse(args.input);let value;
+   if(local.kind==='source_authorize') value={source_ref:'local-consent'};
+   else if(local.kind==='history') value={receipts:[receipt]};
+   else {assert.equal(local.kind,'reconcile');assert.equal(local.source_ref,'local-consent');assert.equal(local.operation_id,'fixture-recovery');checked=true;value={...receipt,last_check:{provider_idle:true,boot_status:'baseline_recorded_restart_required',attribution:'unknown'}};}
+   return {message:'fixture',error:false,items:[],maintenance_results:[value]};
+  }});t.after(()=>f.dom.window.close());
+  await f.w.run('maintenance-local',JSON.stringify({kind:'history'}));await f.tick();
+  let check=[...f.$('maintenance-panel').querySelectorAll('button')].find(b=>b.textContent===f.w.t('maintenance.reconcile'));
+  assert.equal(check.disabled,true);check.click();await f.tick();assert.equal(checked,false);
+  const consent=f.$('maintenance-panel').querySelector('input[type=checkbox]');consent.checked=true;consent.dispatchEvent(new f.w.Event('change'));
+  [...f.$('maintenance-panel').querySelectorAll('button')].find(b=>b.textContent===f.w.t('maintenance.authorize')).click();await f.tick();
+  await f.w.run('maintenance-local',JSON.stringify({kind:'history'}));await f.tick();
+  check=[...f.$('maintenance-panel').querySelectorAll('button')].find(b=>b.textContent===f.w.t('maintenance.reconcile'));assert.equal(check.disabled,false);check.click();await f.tick();
+  assert.equal(checked,true);assert.ok(f.$('maintenance-panel').textContent.includes(f.w.t('maintenance.baseline_recorded_restart_required')));
+  assert.ok(f.$('maintenance-panel').textContent.includes(f.w.t('maintenance.awaiting_reboot')));
+  assert.equal(JSON.stringify(f.saved()).includes('local-consent'),false);
+ }
+});
+
+test('deleting a running session waits for cancellation and ignores late results',async(t)=>{
+  const f=await fixture({deferCancel:true});t.after(()=>f.dom.window.close());
+  f.$('input').value='slow';f.submit('composer');await f.tick();const id=f.saved().active;
+  f.w.document.querySelector(`[data-delete-id="${id}"]`).click();await f.tick();f.$('decision-yes').click();await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='cancel').length,1);
+  assert.equal(f.calls.filter(c=>c.command==='delete_session').length,0);
+  f.finishRequest();await f.tick();assert.equal(f.saved().sessions.length,0);
+  f.events[0]({kind:'result',capability:'file_search',value:{items:[file]}});await f.tick();
+  assert.equal(f.saved().sessions.length,0);assert.equal(f.w.eval(`runtime.has('${id}')`),false);
+});
+
+test('history and draft quotas stop new requests but export preserves all unsaved content',async(t)=>{
+  const f=await fixture();t.after(()=>f.dom.window.close());f.$('reset').click();await f.tick();
+  f.w.eval("workspace.sessions[0].messages=Array.from({length:2000},()=>({role:'assistant',text:'synthetic',error:false}))");
+  f.$('input').value='not sent';f.submit('composer');await f.tick();
+  assert.equal(f.calls.filter(c=>c.command==='perform').length,0);assert.equal(f.$('input').value,'not sent');
+  f.$('export-workspace').click();await f.tick();
+  let exported=f.calls.filter(c=>c.command==='export_workspace').at(-1).args.workspace;
+  assert.equal(exported.sessions[0].messages.length,2000);assert.equal(exported.sessions[0].draft,'not sent');
+  f.w.eval("workspace.sessions[0].messages=Array.from({length:40},()=>({role:'assistant',text:'x'.repeat(250000),error:false}))");
+  f.$('retry-save').click();await f.tick();assert.match(f.$('workspace-status').textContent,/8 MiB/);
+  f.$('export-workspace').click();await f.tick();exported=f.calls.filter(c=>c.command==='export_workspace').at(-1).args.workspace;
+  assert.equal(exported.sessions[0].messages[39].text.length,250000);
+  const id=f.w.eval('workspace.active');f.w.document.querySelector(`[data-delete-id="${id}"]`).click();await f.tick();f.$('decision-yes').click();await f.tick();
+  assert.equal(f.saved().sessions.length,0);f.$('reset').click();await f.tick();
+  f.$('input').value='d'.repeat(64001);f.$('input').dispatchEvent(new f.w.Event('input'));await f.tick();
+  f.$('export-workspace').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='export_workspace').at(-1).args.workspace.sessions[0].draft.length,64001);
+  f.$('input').value='recovered';f.$('input').dispatchEvent(new f.w.Event('input'));await f.tick();assert.equal(f.saved().sessions[0].draft,'recovered');
+});
+
+test('returned messages are not silently truncated and excess remains exportable',async(t)=>{
+  const text='synthetic'.repeat(40000);
+  const f=await fixture({perform:async()=>({message:text,error:false,items:[]})});t.after(()=>f.dom.window.close());
+  f.$('input').value='start';f.submit('composer');await f.tick();
+  assert.equal(f.w.eval('workspace.sessions[0].messages.at(-1).text.length'),text.length);
+  f.$('export-workspace').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='export_workspace').at(-1).args.workspace.sessions[0].messages.at(-1).text,text);
+  f.$('input').value='blocked';f.submit('composer');await f.tick();assert.equal(f.calls.filter(c=>c.command==='perform').length,1);
+});
+
+test('100 session limit can be released by explicit deletion',async(t)=>{
+  const sessions=Array.from({length:100},(_,i)=>({id:`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`,title:`fixture ${i}`,draft:'',messages:[]}));
+  const f=await fixture({workspace:{version:1,sessions,tabs:['home'],active:'home',sidebar_width:205,collapsed:false,home_draft:''}});t.after(()=>f.dom.window.close());
+  f.$('reset').click();await f.tick();assert.equal(f.calls.filter(c=>c.command==='register_session').length,0);
+  f.w.document.querySelector(`[data-delete-id="${sessions[0].id}"]`).click();await f.tick();f.$('decision-yes').click();await f.tick();
+  f.$('reset').click();await f.tick();assert.equal(f.saved().sessions.length,100);assert.equal(f.calls.filter(c=>c.command==='register_session').length,1);
+});
 
 for (const failed of [false,true]) for (const callback of ['progress','result','finally']) {
   test(`close preserves draft ownership during ${callback} and ${failed ? 'failed' : 'successful'} delayed save`,async(t)=>{
@@ -410,11 +497,11 @@ test('settings button retains a descriptive accessible label',async(t)=>{
 });
 
 
-test('rename saves trimmed text to list and tab, restores it, and has no delete UI',async(t)=>{
+test('rename saves trimmed text to list and tab, restores it, and preserves deletion control',async(t)=>{
   const f=await fixture();t.after(()=>f.dom.window.close());
   f.$('reset').click();await f.tick();
   f.$('input').value='draft stays';f.$('input').dispatchEvent(new f.w.Event('input'));await f.tick();
-  assert.equal(f.w.document.querySelector('[aria-label^="删除会话"]'),null);
+  assert.ok(f.w.document.querySelector('[aria-label^="删除会话"]'));
   f.w.document.querySelector('.session-rename').click();
   let input=f.w.document.querySelector('.session-rename-form input');input.value='  我的项目  ';
   f.w.document.querySelector('[aria-label="保存名称"]').click();await f.tick();

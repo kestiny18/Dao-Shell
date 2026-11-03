@@ -30,6 +30,7 @@ pub(crate) struct ModelClient {
     endpoint: Url,
     model: String,
     key: Option<HeaderValue>,
+    budget: super::budget::Budget,
 }
 
 #[derive(Deserialize)]
@@ -109,7 +110,14 @@ impl ModelClient {
             endpoint,
             model: config.model.clone(),
             key,
+            budget: Default::default(),
         })
+    }
+
+    pub fn set_budget(&mut self, budget: super::budget::Budget) -> Result<()> {
+        budget.validate()?;
+        self.budget = budget;
+        Ok(())
     }
 
     pub async fn request(
@@ -119,8 +127,21 @@ impl ModelClient {
         cancel: &Cancellation,
     ) -> Result<(Assistant, Option<u64>)> {
         cancel.check()?;
-        let payload = json!({"model":self.model,"messages":messages,"tools":tools,
+        let mut payload = json!({"model":self.model,"messages":messages,"tools":tools,
             "tool_choice":"auto","parallel_tool_calls":false,"stream":false});
+        let parameter = match self.budget.output_parameter {
+            super::budget::OutputParameter::MaxTokens => "max_tokens",
+            super::budget::OutputParameter::MaxCompletionTokens => "max_completion_tokens",
+            super::budget::OutputParameter::Auto => {
+                if self.endpoint.host_str() == Some("api.openai.com") {
+                    "max_completion_tokens"
+                } else {
+                    "max_tokens"
+                }
+            }
+        };
+        payload[parameter] = json!(self.budget.output_tokens);
+        let reserved = super::budget::reserve(&self.budget, serde_json::to_vec(&payload)?.len())?;
         let mut request = self.client.post(self.endpoint.clone()).json(&payload);
         if let Some(key) = &self.key {
             request = request.header(AUTHORIZATION, key.clone());
@@ -196,6 +217,9 @@ impl ModelClient {
         let result = tokio::select! { result = network => result,
         _ = async { loop { if cancel.is_cancelled() { break; }
             tokio::time::sleep(Duration::from_millis(50)).await; } } => bail!("本轮已取消") };
+        if let Ok((_, usage)) = &result {
+            super::budget::settle(reserved, *usage);
+        }
         cancel.check()?;
         result
     }

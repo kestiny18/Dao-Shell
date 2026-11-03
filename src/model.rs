@@ -1,4 +1,5 @@
 //! Provider configuration, transport and synthetic diagnostics shared by all entries.
+pub mod budget;
 mod diagnostics;
 pub mod provider;
 mod transport;

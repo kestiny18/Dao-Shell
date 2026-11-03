@@ -39,6 +39,8 @@ pub enum ComputerQuerySharing {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
+    pub model_budget: crate::model::budget::Budget,
+    #[serde(default)]
     pub computer_query_sharing: ComputerQuerySharing,
     #[serde(default)]
     pub ui_language: crate::localization::UiLanguage,
@@ -55,6 +57,16 @@ pub struct Config {
     pub model: Option<ModelConfig>,
 }
 impl Config {
+    /// Names only: child processes must not inherit any configured credential slot.
+    pub fn credential_environment_names(&self) -> Vec<String> {
+        self.models
+            .connections
+            .iter()
+            .map(|c| c.api_key_env.clone())
+            .chain(self.model.iter().map(|m| m.api_key_env.clone()))
+            .filter(|name| !name.is_empty())
+            .collect()
+    }
     pub fn scope(&self, writable: bool) -> Result<crate::files::Scope> {
         let roots: Vec<_> = self
             .read_roots
@@ -87,9 +99,12 @@ impl Config {
         }
         let bytes = fs::read(path).context("无法读取配置")?;
         ensure!(bytes.len() <= 64 * 1024, "配置文件过大");
-        serde_json::from_slice(&bytes).context("配置格式错误")
+        let config: Self = serde_json::from_slice(&bytes).context("配置格式错误")?;
+        config.model_budget.validate()?;
+        Ok(config)
     }
     pub fn save(&self, path: &Path) -> Result<()> {
+        self.model_budget.validate()?;
         let bytes = serde_json::to_vec_pretty(self)?;
         ensure!(bytes.len() <= 64 * 1024, "配置文件过大，原配置保留");
         let parent = path

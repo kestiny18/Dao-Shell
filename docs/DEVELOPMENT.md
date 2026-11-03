@@ -94,3 +94,9 @@ docs/               # 体验、设计、实现证据与开发记录
 `.tools`、`target`、`dist`、数据库、日志、环境文件和 `local` 目录不入库。样例使用虚构文件名；公开错误和截图前移除个人路径、凭据与私人对话地址。
 
 本地P13安装包保留原版本与校验值，不因文档/等价帮助整理重复生成。正式公开产物应从最终提交重新构建；完整实机服务生命周期、另一台电脑C/E诊断与干净机器证据仍按 [P11](plans/2026-10-10-p11-windows-index-service.md) 保留，不能由编译成功替代。
+
+## Checked package source
+
+Run `scripts/check-package-source.ps1 -Target cli` or `-Target desktop` before the corresponding packaging script. It runs the required checks and records a local `.tools/package-check-<target>.json` only on success. Packaging refuses a missing receipt or changed source, including untracked source files, and checks again before publishing its local verification files. Unrelated documentation edits do not invalidate code checks. The receipt is local build evidence, not a signed attestation or independent acceptance. Packaging writes a `.checks.json` copy beside the output.
+
+`./scripts/test-package-source.ps1` exercises refusal for missing/stale evidence, invalid repositories and failed checks, plus acceptance of matching source and unrelated documentation changes. Dependency checks and remaining platform warnings are described in [DEPENDENCY_SECURITY.md](DEPENDENCY_SECURITY.md).

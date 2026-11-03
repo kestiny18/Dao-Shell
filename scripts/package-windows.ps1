@@ -1,6 +1,8 @@
 #Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 $workspace = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'package-source.ps1')
+$checkedFingerprint = Assert-CheckedSource $workspace 'cli' (Join-Path $workspace '.tools/package-check-cli.json')
 & (Join-Path $PSScriptRoot 'dev.ps1') build --release --locked
 $metadata = (& (Join-Path $PSScriptRoot 'dev.ps1') metadata --locked --format-version 1 | ConvertFrom-Json -AsHashtable)
 $project = $metadata.packages | Where-Object { $_.name -eq 'dao-shell' -and -not $_.source } | Select-Object -First 1
@@ -43,8 +45,11 @@ Get-ChildItem -LiteralPath $rustPrefix -Directory -ErrorAction SilentlyContinue 
     }
 }
 $archive = "$package.zip"
+if ($checkedFingerprint -ne (Get-CheckedSource $workspace)) { throw 'Source changed during packaging; refusing archive' }
 Get-ChildItem -LiteralPath $package -Recurse -File | Where-Object { $_.LastWriteTime.Year -lt 1980 } | ForEach-Object { $_.LastWriteTime = [datetime]'1980-01-01' }
 Compress-Archive -Path (Join-Path $package '*') -DestinationPath $archive -Force
+if ($checkedFingerprint -ne (Get-CheckedSource $workspace)) { throw 'Source changed during archive creation; refusing verification' }
+Copy-Item -LiteralPath (Join-Path $workspace '.tools/package-check-cli.json') -Destination "$archive.checks.json"
 $hash = Get-FileHash -LiteralPath $archive -Algorithm SHA256
 "$($hash.Hash.ToLower())  $([System.IO.Path]::GetFileName($archive))" | Set-Content -Encoding ASCII -LiteralPath "$archive.sha256"
 $hash | Format-List

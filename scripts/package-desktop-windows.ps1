@@ -4,6 +4,8 @@ param([ValidateRange(1, 32)][int]$Jobs = 2)
 $ErrorActionPreference = 'Stop'
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $desktop = Join-Path $workspace 'desktop'
+. (Join-Path $PSScriptRoot 'package-source.ps1')
+$checkedFingerprint = Assert-CheckedSource $workspace 'desktop' (Join-Path $workspace '.tools/package-check-desktop.json')
 $previousPath = $env:Path
 $previousPayloadRequirement=$env:DAO_SHELL_REQUIRE_INDEX_PAYLOAD
 try {
@@ -69,7 +71,9 @@ try {
     $dist = Join-Path $workspace 'dist'
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
     $output = Join-Path $dist "Dao-Shell-$($project.version)-windows-x64-setup.exe"
+    if ($checkedFingerprint -ne (Get-CheckedSource $workspace)) { throw 'Source changed during packaging; refusing verified output' }
     Copy-Item -LiteralPath $installer -Destination $output
+    Copy-Item -LiteralPath (Join-Path $workspace '.tools/package-check-desktop.json') -Destination "$output.checks.json"
     $hash = Get-FileHash -LiteralPath $output -Algorithm SHA256
     "$($hash.Hash.ToLower())  $([IO.Path]::GetFileName($output))" | Set-Content -Encoding ASCII -LiteralPath "$output.sha256"
     Write-Host "Installer: $output"

@@ -9,9 +9,11 @@ pub use native::probe;
 pub fn probe() -> serde_json::Value {
     serde_json::json!({"available":false,"code":"unsupported_platform"})
 }
+mod boot;
 pub mod contract;
 pub mod dns;
 pub mod engine;
+pub mod isolated;
 pub mod startup;
 pub mod store;
 #[cfg(windows)]

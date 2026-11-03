@@ -99,7 +99,10 @@ impl Engine {
     ) -> Result<Value> {
         ensure!(!self.used, "side_effect_already_attempted");
         self.used = true;
-        ensure!(!self.unresolved()?, "maintenance_reconciliation_required");
+        ensure!(
+            !self.blocks(&receipt)?,
+            "maintenance_reconciliation_required"
+        );
         let confirmation_started = std::time::Instant::now();
         if cancel.is_cancelled()
             || !confirm(&receipt)?
@@ -142,6 +145,49 @@ impl Engine {
             )
         }))
     }
+    /// Preserve the unknown operation while restricting only its affected target.
+    pub fn blocks(&self, candidate: &Value) -> Result<bool> {
+        fn family(value: &Value) -> &str {
+            match value["operation"].as_str().unwrap_or("") {
+                "install" | "upgrade" | "uninstall" => "software",
+                "startup_disable" | "startup_restore" => "startup",
+                "flush_dns_cache" => "dns",
+                _ => "unknown",
+            }
+        }
+        Ok(self.history()?.iter().any(|old| {
+            if !pending(old) {
+                return false;
+            }
+            let kind = family(old);
+            if kind == "unknown" {
+                return true;
+            }
+            if kind != family(candidate) {
+                return false;
+            }
+            let equal = |a: &Value, b: &Value| match (a.as_str(), b.as_str()) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                _ => true, // Missing old identity remains blocked within its family.
+            };
+            match kind {
+                "software" => {
+                    equal(
+                        &old["package"]["source_id"],
+                        &candidate["package"]["source_id"],
+                    ) && equal(
+                        &old["package"]["package_id"],
+                        &candidate["package"]["package_id"],
+                    )
+                }
+                "startup" => equal(
+                    &old["startup_proof"]["original"],
+                    &candidate["startup_proof"]["original"],
+                ),
+                _ => true,
+            }
+        }))
+    }
     pub fn execute(
         &mut self,
         plan: &Plan,
@@ -152,7 +198,10 @@ impl Engine {
     ) -> Result<Value> {
         ensure!(!self.used, "side_effect_already_attempted");
         self.used = true;
-        ensure!(!self.unresolved()?, "maintenance_reconciliation_required");
+        ensure!(
+            !self.blocks(&json!({"operation":plan.operation,"package":plan.package.identity}))?,
+            "maintenance_reconciliation_required"
+        );
         let current = provider.inspect(&plan.package.identity)?;
         // Confirm only a current, exact plan. Agreement approval is validated separately below.
         plan.revalidate(&current, plan.package.agreement_digest.as_deref())?;
@@ -173,6 +222,7 @@ impl Engine {
         receipt["context"] = plan.context.clone();
         receipt["agreement_digest"] = json!(approval.agreement_digest);
         receipt["approval_origin"] = json!("local_confirmation");
+        receipt["boot_sequence"] = json!(super::boot::sequence());
         self.journal.save(&receipt)?; // Must succeed before any native dispatch.
         if cancel.is_cancelled()
             || confirmation_started.elapsed() >= std::time::Duration::from_secs(90)
@@ -229,23 +279,165 @@ impl Engine {
         provider_idle: bool,
         current: &Installation,
     ) -> Result<Value> {
+        self.reconcile_with_boot(id, provider_idle, current, super::boot::sequence())
+    }
+    /// DNS flush has no detached provider. Acquiring the exclusive journal lock
+    /// proves this application's synchronous call has ended, not that it worked.
+    pub fn reconcile_local_dns(&mut self, id: &str) -> Result<Value> {
+        let mut receipt = self
+            .history()?
+            .into_iter()
+            .find(|r| r["operation_id"] == id)
+            .ok_or_else(|| anyhow::anyhow!("receipt_not_found"))?;
+        ensure!(
+            receipt["operation"] == "flush_dns_cache",
+            "unsupported_maintenance_entry"
+        );
+        if pending(&receipt) {
+            receipt["last_check"] = json!({"at":crate::core::now(),"attribution":"unknown","local_dispatch_ended":true,"automatic_replay":false});
+            receipt["lifecycle"] = json!("checked_unknown");
+            self.journal.save(&receipt)?;
+        }
+        Ok(receipt)
+    }
+    pub fn reconcile_with_boot(
+        &mut self,
+        id: &str,
+        provider_idle: bool,
+        current: &Installation,
+        boot: Option<u32>,
+    ) -> Result<Value> {
         let mut r = self
             .history()?
             .into_iter()
             .find(|r| r["operation_id"] == id)
             .ok_or_else(|| anyhow::anyhow!("receipt_not_found"))?;
-        r["last_check"] = json!({"at":crate::core::now(),"observed_state":current,"attribution":"unknown","provider_idle":provider_idle});
-        if provider_idle && r["lifecycle"] != "awaiting_reboot" {
+        if !pending(&r) {
+            return Ok(r);
+        }
+        let waiting =
+            r["lifecycle"] == "awaiting_reboot" || r["evidence"]["reboot_required"] == true;
+        let previous = r["boot_sequence"]
+            .as_u64()
+            .or_else(|| r["recovery_boot_baseline"].as_u64());
+        let newer_boot = previous
+            .zip(boot)
+            .is_some_and(|(before, now)| u64::from(now) > before);
+        let boot_status = if !waiting {
+            "not_required"
+        } else if newer_boot {
+            "new_boot_observed"
+        } else if boot.is_none() {
+            "boot_evidence_unavailable"
+        } else if previous.is_none() {
+            r["recovery_boot_baseline"] = json!(boot);
+            "baseline_recorded_restart_required"
+        } else {
+            "new_boot_not_observed"
+        };
+        r["last_check"] = json!({"at":crate::core::now(),"observed_state":current,"attribution":"unknown","provider_idle":provider_idle,"boot_status":boot_status,"boot_sequence":boot,"automatic_replay":false});
+        if provider_idle
+            && !matches!(current, Installation::Unknown { .. })
+            && (!waiting || newer_boot)
+        {
             r["lifecycle"] = json!("checked_unknown");
         }
         self.journal.save(&r)?;
         Ok(r)
     }
 }
+fn pending(r: &Value) -> bool {
+    matches!(
+        r["lifecycle"].as_str(),
+        Some("unknown" | "dispatching" | "dispatched" | "awaiting_user" | "awaiting_reboot")
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cmp::Ordering;
+    #[test]
+    fn recovery_requires_idle_authoritative_state_and_a_new_boot_without_claiming_success() {
+        let d = tempfile::tempdir().unwrap();
+        let mut e = Engine::open(d.path()).unwrap();
+        let state = Installation::AbsentVerified { scope: Scope::User };
+        e.journal.save(&json!({"operation_id":"restart","operation":"install","lifecycle":"awaiting_reboot","created_at":crate::core::now(),"boot_sequence":10})).unwrap();
+        assert_eq!(
+            e.reconcile_with_boot("restart", true, &state, Some(10))
+                .unwrap()["lifecycle"],
+            "awaiting_reboot"
+        );
+        assert_eq!(
+            e.reconcile_with_boot("restart", false, &state, Some(11))
+                .unwrap()["lifecycle"],
+            "awaiting_reboot"
+        );
+        assert_eq!(
+            e.reconcile_with_boot(
+                "restart",
+                true,
+                &Installation::Unknown {
+                    reason: "timeout".into()
+                },
+                Some(11)
+            )
+            .unwrap()["lifecycle"],
+            "awaiting_reboot"
+        );
+        let result = e
+            .reconcile_with_boot("restart", true, &state, Some(11))
+            .unwrap();
+        assert_eq!(result["lifecycle"], "checked_unknown");
+        assert_eq!(result["last_check"]["attribution"], "unknown");
+        e.journal.save(&json!({"operation_id":"legacy","operation":"install","lifecycle":"awaiting_reboot","created_at":crate::core::now()})).unwrap();
+        let unavailable = e.reconcile_with_boot("legacy", true, &state, None).unwrap();
+        assert_eq!(
+            unavailable["last_check"]["boot_status"],
+            "boot_evidence_unavailable"
+        );
+        assert!(unavailable["recovery_boot_baseline"].is_null());
+        let first = e
+            .reconcile_with_boot("legacy", true, &state, Some(11))
+            .unwrap();
+        assert_eq!(first["lifecycle"], "awaiting_reboot");
+        assert_eq!(
+            first["last_check"]["boot_status"],
+            "baseline_recorded_restart_required"
+        );
+        assert_eq!(
+            e.reconcile_with_boot("legacy", true, &state, None).unwrap()["lifecycle"],
+            "awaiting_reboot"
+        );
+        assert_eq!(
+            e.reconcile_with_boot("legacy", true, &state, Some(11))
+                .unwrap()["lifecycle"],
+            "awaiting_reboot"
+        );
+        assert_eq!(
+            e.reconcile_with_boot("legacy", true, &state, Some(12))
+                .unwrap()["lifecycle"],
+            "checked_unknown"
+        );
+    }
+    #[test]
+    fn unknown_blocks_same_package_across_case_version_scope_but_not_unrelated_operations() {
+        let d = tempfile::tempdir().unwrap();
+        let mut e = Engine::open(d.path()).unwrap();
+        e.journal.save(&json!({"operation_id":"one","operation":"install","lifecycle":"unknown","created_at":crate::core::now(),"package":{"source_id":"source","package_id":"Fixture.One","version":"1","scope":"user"}})).unwrap();
+        assert!(e.blocks(&json!({"operation":"uninstall","package":{"source_id":"SOURCE","package_id":"fixture.one","version":"2","scope":"system"}})).unwrap());
+        assert!(!e.blocks(&json!({"operation":"install","package":{"source_id":"source","package_id":"Fixture.Two"}})).unwrap());
+        assert!(!e.blocks(&json!({"operation":"flush_dns_cache"})).unwrap());
+        assert!(!e.blocks(&json!({"operation":"startup_restore"})).unwrap());
+        assert!(e.unresolved().unwrap());
+        e.journal.save(&json!({"operation_id":"dns","operation":"flush_dns_cache","lifecycle":"unknown","created_at":crate::core::now()})).unwrap();
+        assert!(e.blocks(&json!({"operation":"flush_dns_cache"})).unwrap());
+        assert_eq!(
+            e.reconcile_local_dns("dns").unwrap()["lifecycle"],
+            "checked_unknown"
+        );
+        assert!(!e.blocks(&json!({"operation":"flush_dns_cache"})).unwrap());
+        assert!(e.unresolved().unwrap());
+    }
     #[cfg(windows)]
     fn startup_fixture() -> (
         tempfile::TempDir,
@@ -353,7 +545,7 @@ mod tests {
     }
     #[cfg(windows)]
     #[test]
-    fn startup_crash_after_move_preserves_proof_and_software_unknown_gate() {
+    fn startup_crash_recovery_preserves_software_unknown_without_blocking_confirmed_restore() {
         let (d, root, retained, _p, proof) = startup_fixture();
         let journal = d.path().join("journal");
         let saved = std::path::PathBuf::from(proof["retained"].as_str().unwrap());
@@ -388,8 +580,10 @@ mod tests {
         assert_eq!(engine.journal.prune(true).unwrap(), 0);
         assert!(saved.exists());
         let mut moved = false;
-        assert!(engine.local_transition(json!({"operation_id":"blocked","operation":"startup_restore","startup_proof":proof}), &Cancellation::default(), &mut |_| Ok(true), &mut || { moved=true; Ok(json!({"lifecycle":"verified"})) }).is_err());
-        assert!(!moved);
+        assert!(engine.local_transition(json!({"operation_id":"restore","operation":"startup_restore","startup_proof":proof}), &Cancellation::default(), &mut |_| Ok(true), &mut || { moved=true; Ok(json!({"lifecycle":"verified"})) }).is_ok());
+        assert!(moved);
+        assert!(engine.unresolved().unwrap());
+        assert!(engine.blocks(&json!({"operation":"install"})).unwrap());
     }
     #[cfg(windows)]
     #[test]

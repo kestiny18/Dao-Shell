@@ -250,6 +250,78 @@ impl NativeProvider {
     }
 }
 impl Provider for NativeProvider {
+    fn recover(&mut self, id: &Identity) -> Result<Recovery> {
+        ensure!(id.source_id == SOURCE, "source_identity_mismatch");
+        let mut rows = self.find(&id.package_id, true, id.scope)?;
+        ensure!(rows.len() == 1, "package_identity_ambiguous");
+        let package = rows.remove(0);
+        ensure!(
+            package
+                .Id()?
+                .to_string()
+                .eq_ignore_ascii_case(&id.package_id),
+            "package_identity_mismatch"
+        );
+        // Upstream PackageManager.cpp returns S_OK + null only when no matching
+        // queue item exists. Projection E_POINTER alone is NOT that proof.
+        // https://github.com/microsoft/winget-cli/blob/master/src/Microsoft.Management.Deployment/PackageManager.cpp
+        let install: IPackageManager2 = self.manager.cast()?;
+        let uninstall: IPackageManager3 = self.manager.cast()?;
+        let idle = unsafe {
+            let mut raw_install = std::ptr::null_mut();
+            let hr = (install.vtable().GetInstallProgress)(
+                install.as_raw(),
+                package.as_raw(),
+                std::ptr::null_mut(),
+                &mut raw_install,
+            );
+            let install_idle = successful_null(hr, raw_install)?;
+            let mut raw_uninstall = std::ptr::null_mut();
+            let hr = (uninstall.vtable().GetUninstallProgress)(
+                uninstall.as_raw(),
+                package.as_raw(),
+                std::ptr::null_mut(),
+                &mut raw_uninstall,
+            );
+            let uninstall_idle = successful_null(hr, raw_uninstall)?;
+            install_idle && uninstall_idle
+        };
+        let installation = if let Some(installed) = installed_version(&package)? {
+            let scope = installed
+                .GetMetadata(PackageVersionMetadataField::InstalledScope)?
+                .to_string();
+            ensure!(
+                scope.eq_ignore_ascii_case(match id.scope {
+                    Scope::User => "user",
+                    Scope::System => "machine",
+                }) || id.scope == Scope::System && scope.eq_ignore_ascii_case("system"),
+                "installed_scope_unknown"
+            );
+            let keys = installed
+                .ProductCodes()?
+                .into_iter()
+                .map(|s| s.to_string())
+                .chain(
+                    installed
+                        .PackageFamilyNames()?
+                        .into_iter()
+                        .map(|s| s.to_string()),
+                )
+                .collect();
+            let mut identity = id.clone();
+            identity.version = installed.Version()?.to_string();
+            Installation::Present {
+                identity,
+                instance: installation_fingerprint(keys)?,
+            }
+        } else {
+            Installation::AbsentVerified { scope: id.scope }
+        };
+        Ok(Recovery {
+            provider_idle: idle,
+            installation,
+        })
+    }
     fn search(&mut self, query: &str) -> Result<Vec<Package>> {
         let mut out = Vec::new();
         for p in self.find(query, false, Scope::User)? {
@@ -349,6 +421,15 @@ impl Provider for NativeProvider {
         }
     }
 }
+/// Releases observed progress handles without cancelling someone else's operation.
+unsafe fn successful_null(hr: windows_core::HRESULT, raw: *mut std::ffi::c_void) -> Result<bool> {
+    let is_null = raw.is_null();
+    if !is_null {
+        drop(unsafe { windows_core::IUnknown::from_raw(raw) });
+    }
+    hr.ok()?;
+    Ok(is_null)
+}
 fn wait<R: windows_core::RuntimeType, P: windows_core::RuntimeType + Stage>(
     op: &windows_future::IAsyncOperationWithProgress<R, P>,
     cancel: &crate::core::Cancellation,
@@ -411,6 +492,19 @@ impl Stage for UninstallProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_projection_error_is_not_idle_proof() {
+        unsafe {
+            assert!(successful_null(windows_core::HRESULT(0), std::ptr::null_mut()).unwrap());
+            assert!(
+                successful_null(
+                    windows_core::HRESULT(0x80004003u32 as i32),
+                    std::ptr::null_mut()
+                )
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn multiple_native_registration_keys_are_not_one_installation() {
         assert!(installation_fingerprint(vec![]).is_err());

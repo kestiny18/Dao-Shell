@@ -38,6 +38,18 @@ pub fn reconcile(identity: &Identity) -> Value {
     }
 }
 
+/// Rebuild from the user token, never from the host's possibly secret-bearing environment.
+#[cfg(windows)]
+pub(crate) fn clean_environment(excluded: &[String]) -> Result<Vec<(String, String)>> {
+    let block = windows::environment(excluded)?;
+    let text = String::from_utf16(&block)?;
+    Ok(text
+        .split('\0')
+        .filter_map(|entry| entry.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect())
+}
+
 #[cfg(windows)]
 mod windows {
     use super::*;
@@ -235,6 +247,38 @@ mod windows {
                     .any(|p| p.to_uppercase().starts_with("PATH="))
             );
             assert!(text.to_uppercase().contains("SYSTEMROOT="));
+        }
+        #[test]
+        fn configured_credential_names_are_removed_from_rebuilt_persistent_environment() {
+            // PATH is a nonsecret persistent user-environment slot. Naming it as the
+            // configured credential exercises registry-derived filtering without
+            // reading real keys or modifying the user's environment registry.
+            let config = crate::config::Config {
+                model: Some(crate::config::ModelConfig {
+                    endpoint: "http://127.0.0.1:1/v1/chat/completions".into(),
+                    model: "unused".into(),
+                    api_key_env: "pAtH".into(),
+                }),
+                ..Default::default()
+            };
+            let original = super::super::clean_environment(&[]).unwrap();
+            assert!(
+                original
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            );
+            let clean =
+                super::super::clean_environment(&config.credential_environment_names()).unwrap();
+            assert!(
+                !clean
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            );
+            assert!(
+                clean
+                    .iter()
+                    .any(|(key, _)| key.eq_ignore_ascii_case("SystemRoot"))
+            );
         }
     }
 }

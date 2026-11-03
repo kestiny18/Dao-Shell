@@ -132,8 +132,16 @@ pub struct DispatchResult {
     pub provider_code: String,
     pub reboot_required: Option<bool>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Recovery {
+    pub provider_idle: bool,
+    pub installation: Installation,
+}
 /// Implementations receive a frozen plan, never model-supplied switches or URLs.
 pub trait Provider {
+    fn recover(&mut self, _: &Identity) -> Result<Recovery> {
+        anyhow::bail!("provider_recovery_unavailable")
+    }
     fn search(&mut self, query: &str) -> Result<Vec<Package>>;
     fn inspect(&mut self, identity: &Identity) -> Result<Package>;
     fn dispatch(

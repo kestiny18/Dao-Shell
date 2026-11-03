@@ -6,6 +6,7 @@ use std::{collections::HashMap, path::PathBuf, time::Instant};
 #[derive(Default)]
 pub struct Store {
     pub directory: Option<PathBuf>,
+    pub excluded_environment: Vec<String>,
     pub used: bool,
     source: Option<String>,
     packages: HashMap<String, (Package, Instant)>,
@@ -37,19 +38,13 @@ pub fn error_code(error: &anyhow::Error) -> &'static str {
         _ => "maintenance_unavailable_or_stale",
     }
 }
-fn provider() -> Result<Box<dyn Provider>> {
-    #[cfg(windows)]
-    {
-        Ok(Box::new(super::typed::NativeProvider::open().map_err(
-            |_| anyhow::anyhow!("software_provider_unavailable"),
-        )?))
-    }
-    #[cfg(not(windows))]
-    {
-        anyhow::bail!("unsupported_platform")
-    }
-}
 impl Store {
+    fn provider(&self, cancel: &crate::core::Cancellation) -> Box<dyn Provider> {
+        Box::new(super::isolated::IsolatedProvider::new(
+            cancel.clone(),
+            self.excluded_environment.clone(),
+        ))
+    }
     fn engine(&self) -> Result<Engine> {
         Engine::open(
             self.directory
@@ -74,6 +69,14 @@ impl Store {
         self.delivered.clear();
     }
     pub fn local(&mut self, args: Value) -> Result<Value> {
+        self.local_with_cancel(args, &crate::core::Cancellation::default())
+    }
+    pub fn local_with_cancel(
+        &mut self,
+        args: Value,
+        cancel: &crate::core::Cancellation,
+    ) -> Result<Value> {
+        cancel.check()?;
         match args["kind"].as_str() {
             #[cfg(debug_assertions)]
             Some("debug_fixture_status") => {
@@ -87,6 +90,37 @@ impl Store {
                 )
             }
             Some("history") => Ok(json!({"receipts":self.engine()?.history()?})),
+            Some("reconcile") => {
+                let id = args["operation_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?;
+                let mut engine = self.engine()?;
+                let receipt = engine
+                    .history()?
+                    .into_iter()
+                    .find(|r| r["operation_id"] == id)
+                    .ok_or_else(|| anyhow::anyhow!("receipt_not_found"))?;
+                match receipt["operation"].as_str() {
+                    Some("install" | "upgrade" | "uninstall") => {
+                        ensure!(
+                            self.source.is_some()
+                                && self.source.as_deref() == args["source_ref"].as_str(),
+                            "software_source_confirmation_required"
+                        );
+                        let identity: Identity =
+                            serde_json::from_value(receipt["package"].clone())?;
+                        let observed = self.provider(cancel).recover(&identity)?;
+                        cancel.check()?;
+                        engine.reconcile(id, observed.provider_idle, &observed.installation)
+                    }
+                    Some("flush_dns_cache") => engine.reconcile_local_dns(id),
+                    Some("startup_disable" | "startup_restore") => {
+                        drop(engine);
+                        self.startup_targets()
+                    }
+                    _ => anyhow::bail!("provider_recovery_unavailable"),
+                }
+            }
             Some("startup_targets") => self.startup_targets(),
             _ => anyhow::bail!("unsupported_maintenance_entry"),
         }
@@ -108,7 +142,6 @@ impl Store {
         if is_write(name) {
             ensure!(!self.used, "side_effect_already_attempted");
             self.used = true;
-            ensure!(!self.unresolved(), "maintenance_reconciliation_required");
         }
         match name {
             "software_search" => {
@@ -119,7 +152,7 @@ impl Store {
                 let query = args["query"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("invalid_arguments"))?;
-                let mut provider = provider()?;
+                let mut provider = self.provider(cancel);
                 let packages = provider.search(query)?;
                 self.packages.clear();
                 Ok(
@@ -135,7 +168,7 @@ impl Store {
                     .get(key)
                     .ok_or_else(|| anyhow::anyhow!("reference_expired"))?;
                 ensure!(t.elapsed().as_secs() < 300, "reference_expired");
-                let p = provider()?.inspect(&p.identity)?;
+                let p = self.provider(cancel).inspect(&p.identity)?;
                 Ok(self.remember(p))
             }
             "software_install" | "software_upgrade" | "software_uninstall" => {
@@ -163,7 +196,7 @@ impl Store {
                         "scope_changed"
                     );
                 }
-                let mut provider = provider()?;
+                let mut provider = self.provider(cancel);
                 let target = if name == "software_uninstall" {
                     match &p.installation {
                         Installation::Present { identity, .. } => identity,
@@ -574,5 +607,33 @@ mod tests {
         assert!(s.source.is_some());
         s.reset();
         assert!(s.source.is_none());
+    }
+    #[test]
+    fn recovery_keeps_history_local_and_requires_current_source_consent() {
+        let d = tempfile::tempdir().unwrap();
+        let mut e = Engine::open(d.path()).unwrap();
+        e.local_transition(json!({"operation_id":"unknown","operation":"install","package":{"source_id":"Microsoft.Winget.Source_8wekyb3d8bbwe","package_id":"Synthetic.Fixture","version":"1","scope":"user","architecture":"x64"}}),&crate::core::Cancellation::default(),&mut |_|Ok(true),&mut ||anyhow::bail!("synthetic lost worker")).unwrap();
+        drop(e);
+        let mut s = Store {
+            directory: Some(d.path().into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            s.local(json!({"kind":"history"})).unwrap()["receipts"][0]["lifecycle"],
+            "unknown"
+        );
+        for token in [Value::Null, json!("forged")] {
+            assert_eq!(
+                s.local(json!({"kind":"reconcile","operation_id":"unknown","source_ref":token}))
+                    .unwrap_err()
+                    .to_string(),
+                "software_source_confirmation_required"
+            );
+        }
+        let consent = s.local(json!({"kind":"source_authorize"})).unwrap();
+        let cancelled = crate::core::Cancellation::default();
+        cancelled.cancel();
+        assert!(s.local_with_cancel(json!({"kind":"reconcile","operation_id":"unknown","source_ref":consent["source_ref"]}),&cancelled).is_err());
+        assert!(s.engine().unwrap().unresolved().unwrap());
     }
 }

@@ -131,7 +131,11 @@ pub async fn run(args: Args) -> Result<()> {
                     .items
                     .get(index.checked_sub(1).context("序号从 1 开始")?)
                     .context("序号不在本页结果中")?;
-                let opened = files::open(&objects.checked(&object.id, &scope, false)?)?;
+                let opened = files::open_with_environment(
+                    &objects.checked(&object.id, &scope, false)?,
+                    &config.credential_environment_names(),
+                    &cancel,
+                )?;
                 if json {
                     pretty(&opened);
                 } else {
@@ -192,6 +196,7 @@ pub async fn run(args: Args) -> Result<()> {
         application_actions: Default::default(),
         maintenance: Default::default(),
     };
+    runtime.application_actions.excluded_environment = config.credential_environment_names();
     chat(&config, &mut runtime).await
 }
 
@@ -203,7 +208,8 @@ async fn chat(config: &Config, runtime: &mut Runtime) -> Result<()> {
     );
     let mut dialogue = match &config.model {
         Some(model) => match Dialogue::new(model, runtime) {
-            Ok(d) => {
+            Ok(mut d) => {
+                d.set_budget(config.model_budget.clone())?;
                 println!(
                     "模型：{}（{}）。输入、选中的文件元数据和采样结果会发往该服务；不读取文件正文。",
                     safe_text(&model.model),
@@ -303,7 +309,11 @@ fn shortcut(
         "/open" => {
             let id = selection(rest, runtime)?;
             let object = runtime.objects.checked(&id, &runtime.scope, false)?;
-            let value = files::open(&object)?;
+            let value = files::open_with_environment(
+                &object,
+                &runtime.application_actions.excluded_environment,
+                &runtime.cancel,
+            )?;
             ui.result("file_open", &value);
             if let Some(d) = dialogue {
                 d.observe_local("file_open", &value);

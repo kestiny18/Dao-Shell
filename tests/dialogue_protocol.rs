@@ -105,7 +105,7 @@ async fn file_entry_rejects_model_tools_outside_its_profile() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         let names: Vec<_> = body["tools"]
             .as_array()
@@ -149,7 +149,7 @@ async fn file_entry_rejects_model_tools_outside_its_profile() {
                 json!({"object_ids":[],"destination":"C:\\"}),
             ),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert!(
             body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -163,6 +163,12 @@ async fn file_entry_rejects_model_tools_outside_its_profile() {
         );
     });
     let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui::default();
     dialogue
         .turn("帮我移动文件", &mut runtime, &mut ui)
@@ -182,7 +188,7 @@ async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert_eq!(body["tools"].as_array().unwrap().len(), 6);
         assert_eq!(body["messages"][1]["content"], "找合同文件");
@@ -190,7 +196,7 @@ async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() 
             &mut stream,
             call("search-1", "file_search", json!({"query":"合同"})),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert!(!body.to_string().contains("PRIVATE BODY"));
         let result = body["messages"].as_array().unwrap().last().unwrap();
@@ -201,7 +207,7 @@ async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() 
             &mut stream,
             json!({"content":"找到 1 个文件。","tool_calls":null}),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert_eq!(
             body["messages"].as_array().unwrap().last().unwrap()["content"],
@@ -215,7 +221,7 @@ async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() 
                 json!({"object_ids":[id],"destination":dest_for_server}),
             ),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         let tool = body["messages"].as_array().unwrap().last().unwrap();
         assert_eq!(tool["tool_call_id"], "move-1");
@@ -224,6 +230,12 @@ async fn two_turn_search_then_move_preserves_real_reference_and_tool_protocol() 
         respond(&mut stream, json!({"content":"已移动 1 项并核验。"}));
     });
     let mut dialogue = Dialogue::new(&endpoint, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui {
         approve: true,
         ..Default::default()
@@ -253,7 +265,7 @@ async fn model_cannot_inject_approval_or_execute_unregistered_commands() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         request(&mut stream);
         respond(
             &mut stream,
@@ -263,7 +275,7 @@ async fn model_cannot_inject_approval_or_execute_unregistered_commands() {
                 json!({"object_ids":[],"destination":"C:\\","approved":true}),
             ),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert!(
             body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -279,7 +291,7 @@ async fn model_cannot_inject_approval_or_execute_unregistered_commands() {
                 json!({"command":"should never execute"}),
             ),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         assert!(
             body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -290,6 +302,12 @@ async fn model_cannot_inject_approval_or_execute_unregistered_commands() {
         respond(&mut stream, json!({"content":"无法执行。"}));
     });
     let mut dialogue = Dialogue::new(&endpoint, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui::default();
     dialogue.turn("test", &mut runtime, &mut ui).await.unwrap();
     server.join().unwrap();
@@ -304,7 +322,7 @@ async fn bounded_loop_stops_after_twelve_calls() {
     let endpoint = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         for number in 0..12 {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             request(&mut stream);
             respond(
                 &mut stream,
@@ -317,6 +335,12 @@ async fn bounded_loop_stops_after_twelve_calls() {
         }
     });
     let mut dialogue = Dialogue::new(&endpoint, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui::default();
     let answer = dialogue.turn("test", &mut runtime, &mut ui).await.unwrap();
     server.join().unwrap();
@@ -433,6 +457,10 @@ fn file_session(
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("合同.txt"), "synthetic").unwrap();
     let config = dao_shell::config::Config {
+        model_budget: dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        },
         read_roots: vec![temp.path().to_owned()],
         model,
         ..Default::default()
@@ -454,13 +482,13 @@ async fn desktop_sharing_is_enforced_before_collection_and_cannot_be_granted_by_
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let model = config(listener.local_addr().unwrap());
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             request(&mut stream);
             respond(
                 &mut stream,
                 call("query", "computer_profile", json!({"refresh":true})),
             );
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             let body = request(&mut stream);
             let tool: Value = serde_json::from_str(
                 body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -476,6 +504,12 @@ async fn desktop_sharing_is_enforced_before_collection_and_cannot_be_granted_by_
             );
         });
         let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+        dialogue
+            .set_budget(dao_shell::model::budget::Budget {
+                run_tokens: 1_000_000_000,
+                ..Default::default()
+            })
+            .unwrap();
         let mut ui = Ui::default();
         dialogue
             .turn(
@@ -499,7 +533,7 @@ async fn computer_facts_remain_visible_after_model_failure_and_model_gets_only_p
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         request(&mut stream);
         respond(
             &mut stream,
@@ -509,7 +543,7 @@ async fn computer_facts_remain_visible_after_model_failure_and_model_gets_only_p
                 json!({"sections":["cpu","memory"],"sample_ms":500,"limit":2}),
             ),
         );
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         let body = request(&mut stream);
         let tool: Value = serde_json::from_str(
             body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -540,6 +574,10 @@ async fn computer_facts_remain_visible_after_model_failure_and_model_gets_only_p
         read_roots: vec![temp.path().into()],
         model: Some(model),
         computer_query_sharing: dao_shell::config::ComputerQuerySharing::Enabled,
+        model_budget: dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let mut s = dao_shell::session::FileSession::new(&config, Cancellation::default()).unwrap();
@@ -569,7 +607,7 @@ async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_tu
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         request(&mut s);
         respond(
             &mut s,
@@ -579,7 +617,7 @@ async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_tu
                 json!({"kind":"close","query":"fixture"}),
             ),
         );
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         let b = request(&mut s);
         assert!(
             b["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -595,7 +633,7 @@ async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_tu
                 json!({"target_ref":"fabricated"}),
             ),
         );
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         let b = request(&mut s);
         assert!(
             b["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -611,7 +649,7 @@ async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_tu
                 json!({"object_id":"fabricated"}),
             ),
         );
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         let b = request(&mut s);
         assert!(
             b["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -625,6 +663,12 @@ async fn close_unavailable_blocks_termination_and_file_open_in_the_same_model_tu
         );
     });
     let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui::default();
     dialogue
         .turn("Close the owned fixture", &mut runtime, &mut ui)
@@ -700,7 +744,7 @@ async fn unified_entry_never_implicitly_searches_on_model_errors() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let model = config(listener.local_addr().unwrap());
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             request(&mut stream);
             write!(
                 stream,
@@ -747,7 +791,7 @@ async fn unified_entry_tool_results_errors_and_refusals_never_replay() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let model = config(listener.local_addr().unwrap());
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             request(&mut stream);
             let args = match kind {
                 "empty" => json!({"query":"absent"}),
@@ -756,7 +800,7 @@ async fn unified_entry_tool_results_errors_and_refusals_never_replay() {
                 _ => json!({"query":"合同"}),
             };
             respond(&mut stream, call("first", "file_search", args));
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             let body = request(&mut stream);
             if kind == "permission" || kind == "bad_arguments" {
                 let value: Value = serde_json::from_str(
@@ -782,7 +826,7 @@ async fn unified_entry_tool_results_errors_and_refusals_never_replay() {
                         json!({"object_id":value["items"][0]["id"]}),
                     ),
                 );
-                let (next, _) = listener.accept().unwrap();
+                let (next, _) = accept(&listener).unwrap();
                 stream = next;
                 request(&mut stream);
             }
@@ -818,7 +862,7 @@ async fn unified_entry_normal_answer_does_not_search() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         request(&mut stream);
         respond(&mut stream, json!({"content":"没有找到"}));
     });
@@ -840,7 +884,7 @@ async fn unified_entry_cancel_during_model_wait_does_not_fallback() {
     let cancel = Cancellation::default();
     let server_cancel = cancel.clone();
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         request(&mut stream);
         server_cancel.cancel();
         thread::sleep(Duration::from_millis(150));
@@ -866,7 +910,7 @@ async fn desktop_reply_language_replaces_conflicting_rule_preserves_boundaries_a
         let model = config(listener.local_addr().unwrap());
         let server = thread::spawn(move || {
             for round in 0..2 {
-                let (mut stream, _) = listener.accept().unwrap();
+                let (mut stream, _) = accept(&listener).unwrap();
                 let body = request(&mut stream);
                 let system = body["messages"][0]["content"].as_str().unwrap();
                 assert!(!system.contains("使用中文，简洁。"));
@@ -896,6 +940,12 @@ async fn desktop_reply_language_replaces_conflicting_rule_preserves_boundaries_a
             }
         });
         let mut dialogue = Dialogue::new_file_entry_language(&model, &runtime, language).unwrap();
+        dialogue
+            .set_budget(dao_shell::model::budget::Budget {
+                run_tokens: 1_000_000_000,
+                ..Default::default()
+            })
+            .unwrap();
         let mut ui = Ui::default();
         assert_eq!(
             dialogue
@@ -951,7 +1001,7 @@ async fn diagnostics_cancel_preserves_summary_and_never_calls_model_again() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let (mut stream, _) = accept(&listener).unwrap();
         request(&mut stream);
         respond(
             &mut stream,
@@ -973,6 +1023,12 @@ async fn diagnostics_cancel_preserves_summary_and_never_calls_model_again() {
         cancel: runtime.cancel.clone(),
     };
     let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     assert!(
         dialogue
             .turn("Observe then stop", &mut runtime, &mut ui)
@@ -999,7 +1055,7 @@ async fn diagnostics_model_cannot_register_endpoint_or_invent_network_authorizat
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let model = config(listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         request(&mut s);
         respond(
             &mut s,
@@ -1009,7 +1065,7 @@ async fn diagnostics_model_cannot_register_endpoint_or_invent_network_authorizat
                 json!({"mode":"probe","endpoint_refs":["invented"],"checks":["tcp"]}),
             ),
         );
-        let (mut s, _) = listener.accept().unwrap();
+        let (mut s, _) = accept(&listener).unwrap();
         let body = request(&mut s);
         let result: Value = serde_json::from_str(
             body["messages"].as_array().unwrap().last().unwrap()["content"]
@@ -1024,6 +1080,12 @@ async fn diagnostics_model_cannot_register_endpoint_or_invent_network_authorizat
         );
     });
     let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+    dialogue
+        .set_budget(dao_shell::model::budget::Budget {
+            run_tokens: 1_000_000_000,
+            ..Default::default()
+        })
+        .unwrap();
     let mut ui = Ui::default();
     dialogue
         .turn("Check network", &mut runtime, &mut ui)
@@ -1040,7 +1102,7 @@ async fn diagnostic_summary_explanation_is_one_request_with_no_tools() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let model = config(listener.local_addr().unwrap());
         let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let (mut stream, _) = accept(&listener).unwrap();
             let body = request(&mut stream);
             assert_eq!(body["tools"], json!([]));
             assert_eq!(body["messages"].as_array().unwrap().len(), 2);
@@ -1058,6 +1120,12 @@ async fn diagnostic_summary_explanation_is_one_request_with_no_tools() {
             );
         });
         let mut dialogue = Dialogue::new_file_entry(&model, &runtime).unwrap();
+        dialogue
+            .set_budget(dao_shell::model::budget::Budget {
+                run_tokens: 1_000_000_000,
+                ..Default::default()
+            })
+            .unwrap();
         let result = dialogue
             .explain_observation(
                 &json!({"kind":"resource_observe","data":{"summary":{"cpu.percent":{"max":30}}}}),
@@ -1066,5 +1134,99 @@ async fn diagnostic_summary_explanation_is_one_request_with_no_tools() {
             .await;
         assert_eq!(result.is_err(), malicious);
         server.join().unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn overview_explanation_excludes_file_history_and_rejects_tool_responses() {
+    use dao_shell::{
+        config::{ComputerQuerySharing, Config},
+        session::{Action, FileSession},
+    };
+    for malicious in [false, true] {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("PRIVATE-HISTORY-fixture.txt"), "synthetic").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let config = Config {
+            model: Some(config(listener.local_addr().unwrap())),
+            read_roots: vec![temp.path().into()],
+            computer_query_sharing: ComputerQuerySharing::Enabled,
+            model_budget: dao_shell::model::budget::Budget {
+                run_tokens: 1_000_000_000,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let server = thread::spawn(move || {
+            let (mut stream, _) = accept(&listener).unwrap();
+            let body = request(&mut stream);
+            assert_eq!(body["tools"], json!([]));
+            assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+            assert!(!body.to_string().contains("PRIVATE-HISTORY"));
+            respond(
+                &mut stream,
+                if malicious {
+                    call(
+                        "forged-search",
+                        "file_search",
+                        json!({"query":"PRIVATE-HISTORY"}),
+                    )
+                } else {
+                    json!({"role":"assistant","content":"Current overview only."})
+                },
+            );
+            listener.set_nonblocking(true).unwrap();
+            thread::sleep(Duration::from_millis(150));
+            assert!(
+                listener.accept().is_err(),
+                "explanation must not run another model round"
+            );
+        });
+        let mut session = FileSession::new(&config, Cancellation::default()).unwrap();
+        let mut ui = Ui::default();
+        let files = session
+            .execute(Action::Search("PRIVATE-HISTORY".into()), &mut ui)
+            .await;
+        assert!(!files.error);
+        assert_eq!(files.items.len(), 1);
+        let before = ui.results.len();
+        let reply = session
+            .execute(
+                Action::ExplainComputer(
+                    json!({"observed_at":"fixture", "system":{"cpu_percent":4}}),
+                ),
+                &mut ui,
+            )
+            .await;
+        assert_eq!(reply.error, malicious, "{}", reply.message);
+        assert_eq!(
+            ui.results.len(),
+            before,
+            "tool response must never reach runtime"
+        );
+        assert_eq!(reply.items[0].id, files.items[0].id);
+        server.join().unwrap();
+    }
+}
+
+// Bound fake-server waits so a rejected request cannot strand the test process.
+fn accept(listener: &TcpListener) -> std::io::Result<(TcpStream, std::net::SocketAddr)> {
+    listener.set_nonblocking(true)?;
+    let start = std::time::Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((stream, address)) => {
+                stream.set_nonblocking(false)?;
+                stream.set_read_timeout(Some(Duration::from_secs(15)))?;
+                return Ok((stream, address));
+            }
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    && start.elapsed() < Duration::from_secs(15) =>
+            {
+                thread::sleep(Duration::from_millis(5))
+            }
+            Err(e) => return Err(e),
+        }
     }
 }

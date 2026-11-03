@@ -5,8 +5,11 @@ use std::{fs, path::Path};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
+pub(crate) use windows::open_document_direct;
+#[cfg(windows)]
 pub use windows::{
-    DirectoryGuard, identity, move_file, move_file_checked, open_document, pin_directory,
+    DirectoryGuard, identity, move_file, move_file_checked, open_document,
+    open_document_with_environment, pin_directory,
 };
 
 pub fn is_link(metadata: &fs::Metadata) -> bool {
@@ -37,6 +40,15 @@ pub fn move_file(_: &Path, _: &Path, _: &FileIdentity) -> Result<()> {
 }
 #[cfg(not(windows))]
 pub fn open_document(_: &Path, _: &FileIdentity) -> Result<()> {
+    anyhow::bail!("打开文件暂只支持 Windows")
+}
+#[cfg(not(windows))]
+pub fn open_document_with_environment(
+    _: &Path,
+    _: &FileIdentity,
+    _: &[String],
+    _: &crate::core::Cancellation,
+) -> Result<()> {
     anyhow::bail!("打开文件暂只支持 Windows")
 }
 #[cfg(unix)]

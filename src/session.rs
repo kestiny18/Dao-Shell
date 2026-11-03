@@ -21,6 +21,7 @@ pub struct SessionInfo {
 
 #[derive(Serialize)]
 pub struct Reply {
+    pub model_usage: crate::model::budget::Usage,
     pub message: String,
     pub error: bool,
     pub items: Vec<FileObject>,
@@ -88,13 +89,15 @@ impl FileSession {
             maintenance: Default::default(),
         };
         runtime.computer.desktop = true;
+        runtime.application_actions.excluded_environment = config.credential_environment_names();
+        runtime.maintenance.excluded_environment = config.credential_environment_names();
         runtime.computer.sharing = config.computer_query_sharing;
         let (dialogue, model_error) = match config
             .model
             .as_ref()
             .map(|c| Dialogue::new_file_entry_language(c, &runtime, language))
         {
-            Some(Ok(dialogue)) => (Some(dialogue), None),
+            Some(Ok(mut dialogue)) => { dialogue.set_budget(config.model_budget.clone())?; (Some(dialogue), None) },
             Some(Err(error)) => (None, Some(format!("{error:#}"))),
             None => (
                 None,
@@ -122,14 +125,8 @@ impl FileSession {
     pub fn set_action_directory(&mut self, directory: std::path::PathBuf, config: &Config) {
         self.runtime.maintenance.directory = directory.parent().map(|p| p.join("maintenance"));
         self.runtime.application_actions.directory = Some(directory);
-        self.runtime.application_actions.excluded_environment = config
-            .models
-            .connections
-            .iter()
-            .map(|c| c.api_key_env.clone())
-            .chain(config.model.iter().map(|c| c.api_key_env.clone()))
-            .filter(|s| !s.is_empty())
-            .collect();
+        self.runtime.application_actions.excluded_environment =
+            config.credential_environment_names();
     }
     pub fn set_inventory(&mut self, inventory: std::sync::Arc<crate::inventory::Inventory>) {
         self.runtime.objects.set_inventory(inventory);
@@ -175,6 +172,7 @@ impl FileSession {
             .filter_map(|id| self.runtime.objects.get(id).ok().cloned())
             .collect();
         Reply {
+            model_usage: crate::model::budget::snapshot(),
             search_receipt: self.runtime.last_search.clone(),
             observations: self.runtime.computer.delivered.clone(),
             action_receipts: self.runtime.application_actions.delivered.clone(),
@@ -193,7 +191,7 @@ impl FileSession {
                 let v = self
                     .runtime
                     .maintenance
-                    .local(args)
+                    .local_with_cancel(args, &self.runtime.cancel)
                     .map_err(|e| anyhow::anyhow!(crate::software::store::error_code(&e)))?;
                 self.runtime.maintenance.delivered.push(v.clone());
                 ui.result("maintenance_result", &v);
@@ -276,14 +274,11 @@ impl FileSession {
                             .choose("请先在设置中连接模型", "Connect a model in Settings first")
                     )
                 })?;
-                dialogue.observe_local("resource_snapshot", &snapshot);
-                dialogue.turn(self.language.choose("请根据刚才电脑概览的本地采样，简洁解释磁盘、CPU 和内存情况。标明采样时间与局限，只分析已有数据，不调用文件工具。", "Briefly explain the local disk, CPU and memory snapshot. State its observation time and limits. Analyze only the supplied facts and do not call file tools."), &mut self.runtime, ui).await
+                dialogue
+                    .explain_observation(&snapshot, &self.runtime.cancel)
+                    .await
             }
             Action::Application { tool, arguments } => {
-                ensure!(
-                    !self.runtime.maintenance.unresolved(),
-                    "maintenance_reconciliation_required"
-                );
                 if tool != "app_targets" {
                     self.runtime.maintenance.used = true;
                 }

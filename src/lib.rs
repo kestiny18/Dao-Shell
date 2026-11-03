@@ -15,6 +15,7 @@ pub mod profile;
 pub mod resources;
 pub mod search_index;
 pub mod session;
+pub mod shell_handoff;
 pub mod storage;
 
 pub mod computer;

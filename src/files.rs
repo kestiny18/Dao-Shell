@@ -722,6 +722,15 @@ fn match_score(
 pub fn open(object: &FileObject) -> Result<serde_json::Value> {
     open_using(object, platform::open_document)
 }
+pub fn open_with_environment(
+    object: &FileObject,
+    excluded: &[String],
+    cancel: &Cancellation,
+) -> Result<serde_json::Value> {
+    open_using(object, |path, identity| {
+        platform::open_document_with_environment(path, identity, excluded, cancel)
+    })
+}
 fn open_using(
     object: &FileObject,
     executor: impl FnOnce(&Path, &crate::core::FileIdentity) -> Result<()>,

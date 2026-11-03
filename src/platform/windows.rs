@@ -14,7 +14,6 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{HANDLE, INVALID_HANDLE_VALUE},
     Storage::FileSystem::*,
-    UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
 };
 
 fn wide(value: &OsStr) -> Vec<u16> {
@@ -196,6 +195,34 @@ fn move_file_impl(
 }
 
 pub fn open_document(path: &Path, expected: &FileIdentity) -> Result<()> {
+    open_document_with_environment(path, expected, &[], &crate::core::Cancellation::default())
+}
+
+pub fn open_document_with_environment(
+    path: &Path,
+    expected: &FileIdentity,
+    excluded: &[String],
+    cancel: &crate::core::Cancellation,
+) -> Result<()> {
+    let _guard = pin_directory(path.parent().context("无法打开卷根目录")?)?;
+    let file = file_handle(path, false, true)?;
+    ensure!(&identity_of(&file)? == expected, "对象已变化，请重新查找");
+    ensure!(
+        crate::shell_handoff::document(path, expected, excluded, cancel)?,
+        "打开已取消，未报告成功"
+    );
+    Ok(())
+}
+
+/// Only the internal process with a rebuilt environment invokes the OS shell.
+pub(crate) fn open_document_direct(path: &Path, expected: &FileIdentity) -> Result<()> {
+    use windows::{
+        Win32::UI::{
+            Shell::{SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW},
+            WindowsAndMessaging::SW_SHOWNORMAL,
+        },
+        core::PCWSTR,
+    };
     let _guard = pin_directory(path.parent().context("无法打开卷根目录")?)?;
     let file = file_handle(path, false, true)?;
     ensure!(&identity_of(&file)? == expected, "对象已变化，请重新查找");
@@ -208,23 +235,23 @@ pub fn open_document(path: &Path, expected: &FileIdentity) -> Result<()> {
         .to_owned();
     let target = wide(OsStr::new(&normal));
     let verb = wide(OsStr::new("open"));
-    let result = unsafe {
-        ShellExecuteW(
-            ptr::null_mut(),
-            verb.as_ptr(),
-            target.as_ptr(),
-            ptr::null(),
-            ptr::null(),
-            SW_SHOWNORMAL,
-        )
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        // Complete the shell handoff before the short-lived helper exits.
+        fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+        lpVerb: PCWSTR(verb.as_ptr()),
+        lpFile: PCWSTR(target.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
     };
-    if result as isize == 31 {
+    let result = unsafe { ShellExecuteExW(&mut info) };
+    if info.hInstApp.0 as isize == 31 {
         anyhow::bail!("此类型尚未配置 Windows 默认打开应用，请先在系统设置中选择关联应用");
     }
     ensure!(
-        result as isize > 32,
+        result.is_ok(),
         "Windows 未接受打开请求（代码 {}）；未报告文件已显示或程序已运行",
-        result as isize
+        info.hInstApp.0 as isize
     );
     Ok(())
 }

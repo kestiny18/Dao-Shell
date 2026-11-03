@@ -75,10 +75,6 @@ impl Runtime {
                 "file_open" | "file_move_batch" | "app_launch" | "process_terminate"
             )
         {
-            ensure!(
-                !self.maintenance.unresolved(),
-                "maintenance_reconciliation_required"
-            );
             self.maintenance.used = true;
         }
         if self.side_effects_blocked && matches!(name, "file_open" | "file_move_batch") {
@@ -191,7 +187,11 @@ impl Runtime {
                     self.application_actions.block_turn();
                 }
                 let request: Reference = serde_json::from_value(arguments)?;
-                self.open_using(&request.object_id, false, ui, files::open)?
+                let excluded = self.application_actions.excluded_environment.clone();
+                let cancel = self.cancel.clone();
+                self.open_using(&request.object_id, false, ui, |o| {
+                    files::open_with_environment(o, &excluded, &cancel)
+                })?
             }
             "file_move_batch" => {
                 let request: Move = serde_json::from_value(arguments)?;
@@ -248,7 +248,11 @@ impl Runtime {
             self.last_results.iter().any(|value| value == id),
             "此候选已失效，请重新查找"
         );
-        let value = self.open_using(id, true, ui, files::open)?;
+        let excluded = self.application_actions.excluded_environment.clone();
+        let cancel = self.cancel.clone();
+        let value = self.open_using(id, true, ui, |o| {
+            files::open_with_environment(o, &excluded, &cancel)
+        })?;
         ui.result("file_open", &value);
         Ok(value)
     }
@@ -260,10 +264,6 @@ impl Runtime {
         opener: impl FnOnce(&FileObject) -> Result<Value>,
     ) -> Result<Value> {
         self.cancel.check()?;
-        ensure!(
-            !self.maintenance.unresolved(),
-            "maintenance_reconciliation_required"
-        );
         self.maintenance.used = true;
         ensure!(
             !self.side_effects_blocked,
@@ -281,7 +281,13 @@ impl Runtime {
             return Ok(json!({"status":"Cancelled","message":"用户未选择打开；没有提交请求"}));
         }
         self.cancel.check()?;
-        opener(&object)
+        let outcome = opener(&object);
+        // A shell handoff may already have happened when its process stops responding.
+        // Never ask the model to retry an unobserved dispatch in the same turn.
+        if outcome.is_err() {
+            self.side_effects_blocked = true;
+        }
+        outcome
     }
 }
 #[derive(Deserialize)]
@@ -355,6 +361,20 @@ mod open_tests {
             "handoff"
         );
         assert_eq!(ui.confirmations, 0);
+        assert!(
+            runtime
+                .open_using(&id, true, &mut ui, |_| anyhow::bail!("unknown handoff"))
+                .is_err()
+        );
+        assert!(runtime.side_effects_blocked);
+        assert!(
+            runtime
+                .open_using(&id, true, &mut ui, |_| panic!(
+                    "unknown result must not replay"
+                ))
+                .is_err()
+        );
+        runtime.side_effects_blocked = false;
         let declined = runtime
             .open_using(&id, false, &mut ui, |_| panic!("declined"))
             .unwrap();
